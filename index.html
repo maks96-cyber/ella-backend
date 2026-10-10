@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS — ELLA</title>
+  <style>
+    body {
+      background-color: #0b0e14;
+      color: #00f0ff;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .orb {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #00f0ff 0%, #0044ff 70%, transparent 100%);
+      box-shadow: 0 0 30px #00f0ff;
+      margin-bottom: 30px;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .orb.listening {
+      animation: pulse 1.2s infinite alternate;
+      box-shadow: 0 0 50px #00ff66;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      100% { transform: scale(1.15); }
+    }
+    .status {
+      font-size: 1.1rem;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .btn {
+      background: transparent;
+      border: 2px solid #00f0ff;
+      color: #00f0ff;
+      padding: 12px 28px;
+      font-size: 1rem;
+      border-radius: 25px;
+      cursor: pointer;
+      margin-bottom: 25px;
+      font-weight: bold;
+    }
+    .output-box {
+      width: 100%;
+      max-width: 450px;
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid #00f0ff;
+      border-radius: 10px;
+      padding: 15px;
+      box-sizing: border-box;
+      min-height: 120px;
+    }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 8px; color: #ffffff; }
+  </style>
+</head>
+<body>
+
+  <div class="orb" id="orb"></div>
+  <div class="status" id="status">Нажмите "Активировать Эллу"</div>
+  <button class="btn" onclick="startJarvis()">Активировать Эллу</button>
+
+  <div class="output-box" id="output">
+    <div id="speechText">Система в режиме ожидания...</div>
+    <ul id="stepsList"></ul>
+  </div>
+
+  <script>
+    const SERVER_URL = 'https://ella-backend-yq1s.onrender.com/api/ask';
+
+    function speak(text, callback) {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'ru-RU';
+      utter.onend = callback;
+      window.speechSynthesis.speak(utter);
+    }
+
+    function startJarvis() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert("Ваш браузер не поддерживает распознавание речи.");
+        return;
+      }
+
+      const rec = new SpeechRecognition();
+      rec.lang = 'ru-RU';
+
+      document.getElementById('status').innerText = "Элла слушает...";
+      document.getElementById('orb').classList.add('listening');
+
+      rec.start();
+
+      rec.onresult = async (e) => {
+        const query = e.results[0][0].transcript;
+        document.getElementById('status').innerText = `Запрос: "${query}"`;
+        document.getElementById('orb').classList.remove('listening');
+
+        try {
+          const res = await fetch(SERVER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+          });
+          const data = await res.json();
+
+          document.getElementById('speechText').innerText = data.speech;
+          const ul = document.getElementById('stepsList');
+          ul.innerHTML = '';
+          (data.steps || []).forEach(step => {
+            const li = document.createElement('li');
+            li.innerText = step;
+            ul.appendChild(li);
+          });
+
+          speak(data.speech, () => {
+            document.getElementById('status').innerText = "Готово к новому запросу";
+          });
+
+        } catch (err) {
+          document.getElementById('status').innerText = "Ошибка связи с сервером";
+        }
+      };
+
+      rec.onerror = () => {
+        document.getElementById('status').innerText = "Ошибка микрофона. Попробуйте снова.";
+        document.getElementById('orb').classList.remove('listening');
+      };
+    }
+  </script>
+</body>
+</html>
