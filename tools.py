@@ -8,6 +8,8 @@ import arbitrage
 import cad
 import geology
 import quantum
+import robotics
+import space
 
 N, I, S = "number", "integer", "string"
 
@@ -114,6 +116,67 @@ SPECS = [
           "Текущие цены и спреды между биржами Binance, Kraken, Coinbase (только чтение, не торговля).",
           {"assets": (S, "Список через запятую: BTC, ETH, SOL (по умолчанию все)")},
           [], _arbitrage),
+    # ----- Модули 8, 14, 15: связь, орбиты, ионная логистика -----
+    _spec("space_link_budget",
+          "Потери в свободном пространстве, задержка и мощность на приёме для спутниковой линии (GNSS, Direct-to-Cell).",
+          {"distance_km": (N, "Дальность, км"),
+           "frequency_mhz": (N, "Частота, МГц (GPS L1 = 1575.42)"),
+           "eirp_dbw": (N, "ЭИИМ передатчика, дБВт (необязательно)"),
+           "rx_gain_dbi": (N, "Усиление приёмной антенны, дБи"),
+           "other_losses_db": (N, "Прочие потери, дБ")},
+          ["distance_km", "frequency_mhz"], space.link_budget),
+    _spec("space_slant_range",
+          "Наклонная дальность до спутника на круговой орбите по высоте и углу места.",
+          {"altitude_km": (N, "Высота орбиты, км"),
+           "elevation_deg": (N, "Угол места, градусы (по умолчанию 90)")},
+          ["altitude_km"], space.slant_range),
+    _spec("space_orbit",
+          "Период и скорость круговой орбиты вокруг Земли.",
+          {"altitude_km": (N, "Высота орбиты, км")},
+          ["altitude_km"], space.orbit),
+    _spec("space_rocket_delta_v",
+          "Уравнение Циолковского: delta-v по массам или отношение масс по delta-v.",
+          {"isp_s": (N, "Удельный импульс, с"),
+           "mass_initial_kg": (N, "Начальная масса, кг"),
+           "mass_final_kg": (N, "Конечная масса, кг"),
+           "delta_v_m_s": (N, "Требуемая delta-v, м/с (вместо масс)")},
+          ["isp_s"], space.rocket_delta_v),
+    _spec("space_ion_thruster",
+          "Ионный двигатель: тяга, расход рабочего тела и ускорение по мощности и удельному импульсу.",
+          {"power_kw": (N, "Мощность, кВт"),
+           "isp_s": (N, "Удельный импульс, с"),
+           "efficiency": (N, "КПД двигателя (по умолчанию 0.6)"),
+           "spacecraft_mass_kg": (N, "Масса аппарата, кг (необязательно)")},
+          ["power_kw", "isp_s"], space.ion_thruster),
+    _spec("space_hohmann",
+          "Перелёт по Гоману между круговыми орбитами вокруг Солнца: delta-v и время (по умолчанию от 1 а.е. к астероиду Психея).",
+          {"r1_au": (N, "Радиус начальной орбиты, а.е. (по умолчанию 1)"),
+           "r2_au": (N, "Радиус конечной орбиты, а.е. (по умолчанию 2.92)")},
+          [], space.hohmann),
+    # ----- Модули 10 и 12: роботы, шасси, извлечение -----
+    _spec("robotics_chassis_drive",
+          "Тяговое усилие, момент на колесо и мощность привода шасси робота на уклоне.",
+          {"mass_kg": (N, "Масса робота, кг"),
+           "wheel_radius_m": (N, "Радиус колеса, м"),
+           "slope_deg": (N, "Уклон, градусы"),
+           "rolling_resistance": (N, "Коэффициент сопротивления качению (по умолчанию 0.05)"),
+           "driven_wheels": (I, "Число ведущих колёс (по умолчанию 4)"),
+           "speed_m_s": (N, "Скорость, м/с (по умолчанию 1)"),
+           "accel_m_s2": (N, "Ускорение, м/с2"),
+           "efficiency": (N, "КПД трансмиссии (по умолчанию 0.8)")},
+          ["mass_kg", "wheel_radius_m"], robotics.chassis_drive),
+    _spec("robotics_battery_runtime",
+          "Время работы от аккумулятора при заданной мощности.",
+          {"capacity_wh": (N, "Ёмкость, Вт·ч"),
+           "power_w": (N, "Потребляемая мощность, Вт"),
+           "usable_fraction": (N, "Доля используемой ёмкости (по умолчанию 0.8)")},
+          ["capacity_wh", "power_w"], robotics.battery_runtime),
+    _spec("robotics_drill_string_load",
+          "Вес бурильной колонны в воздухе и в буровом растворе с учётом плавучести.",
+          {"length_m": (N, "Длина колонны, м"),
+           "mass_per_m_kg": (N, "Масса погонного метра, кг/м (по умолчанию 29)"),
+           "mud_density_kg_m3": (N, "Плотность раствора, кг/м3 (по умолчанию 1200)")},
+          ["length_m"], robotics.drill_string_load),
 ]
 
 _BY_NAME = {s["name"]: s for s in SPECS}
