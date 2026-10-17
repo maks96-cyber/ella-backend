@@ -1,13 +1,14 @@
-"""Ella backend v1.3.0 — модули 1-2 (ИИ), 7, 9, 11, 13."""
+"""Ella backend v1.4.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
 import hmac
 import os
 import time
 from collections import defaultdict, deque
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, Response, g, jsonify, request, send_file
 
 import arbitrage
+import cad
 import geology
 import quantum
 import security
@@ -21,7 +22,8 @@ app = Flask(__name__)
 if CORS:
     CORS(app)
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -38,9 +40,9 @@ MODULES = {
     1: ("Интеграция ИИ (Gemini)", "active"),
     2: ("Интеграция ИИ (Claude)", "active"),
     3: ("Саморазвитие и детское обучение", "planned"),
-    4: ("Голосовой интерфейс и распознавание речи", "planned"),
+    4: ("Голосовой интерфейс и распознавание речи", "beta"),
     5: ("Духовные знания", "planned"),
-    6: ("Инженерия и САПР (Компас-3D, SolidWorks)", "planned"),
+    6: ("Инженерия и САПР (Компас-3D, SolidWorks)", "beta"),
     7: ("Крипто- и финансовый арбитраж", "active"),
     8: ("Спутниковая связь GNSS и Direct-to-Cell", "planned"),
     9: ("Глубинная геология (4-5+ км)", "active"),
@@ -89,15 +91,18 @@ _sessions = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 
 # ---------- Вспомогательные функции ----------
+OPEN_PATHS = ("/", "/health", "/hud", "/auth/login")
+
+
 @app.before_request
 def guard():
     """Модуль 11: rate limit + проверка подписи для всех путей, кроме / и /health."""
-    if request.method == "OPTIONS" or request.path in ("/", "/health"):
+    if request.method == "OPTIONS" or request.path in OPEN_PATHS:
         return None
     ip = security.client_ip(request)
     if security.rate_limited(ip):
         return jsonify({"status": "error", "response": "Слишком много запросов"}), 429
-    ok, reason = security.verify_request(request)
+    ok, reason, g.auth = security.verify_request(request)
     if not ok:
         app.logger.warning("auth denied ip=%s path=%s reason=%s", ip, request.path, reason)
         return jsonify({"status": "error", "response": "Нет доступа"}), 401
@@ -290,6 +295,7 @@ def arbitrage_scan():
 
 # ---------- Расчётные модули 9 и 13 ----------
 CALC_DOMAINS = {
+    "cad": (6, cad.CALCS),
     "geology": (9, geology.CALCS),
     "quantum": (13, quantum.CALCS),
 }
@@ -324,6 +330,102 @@ def calc_run(domain, name):
         return jsonify({"status": "error", "response": str(e)}), 400
     return jsonify({"status": "success", "module": mod_id,
                     "calc": name, "result": result})
+
+
+# ---------- Модуль 4: голосовой HUD и вход ----------
+@app.route("/hud")
+def hud():
+    return send_file(os.path.join(BASE_DIR, "static", "hud.html"))
+
+
+@app.route("/auth/login", methods=["POST"])
+def auth_login():
+    ip = security.client_ip(request)
+    if security.login_rate_limited(ip):
+        return jsonify({"status": "error", "response": "Слишком много попыток"}), 429
+    if not security.login_configured():
+        return jsonify({"status": "error", "response": "Вход не настроен на сервере"}), 503
+    data = request.get_json(silent=True) or {}
+    if not security.check_login(str(data.get("passphrase", ""))):
+        app.logger.warning("login failed ip=%s", ip)
+        return jsonify({"status": "error", "response": "Неверная кодовая фраза"}), 401
+    token, exp = security.issue_token()
+    return jsonify({"status": "success", "token": token, "expires_at": exp})
+
+
+# ---------- Модуль 6: САПР ----------
+def _bridge_only():
+    """Очередь заданий для моста доступна только по HMAC-подписи (не по токену HUD)."""
+    if g.get("auth") != "hmac":
+        return jsonify({"status": "error",
+                        "response": "Только для моста с HMAC-подписью"}), 403
+    return None
+
+
+@app.route("/cad")
+def cad_info():
+    return jsonify({
+        "module": 6,
+        "bridge_actions": list(cad.ACTIONS),
+        "dxf": {k: doc for k, (_, doc) in cad.GENERATORS.items()},
+        "calcs": {k: doc for k, (_, doc) in cad.CALCS.items()},
+    })
+
+
+@app.route("/cad/dxf/<kind>", methods=["POST"])
+def cad_dxf(kind):
+    """POST /cad/dxf/flange {...} — вернёт DXF-файл для Компаса/SolidWorks."""
+    entry = cad.GENERATORS.get(kind)
+    if not entry:
+        return jsonify({"status": "error", "response": "Неизвестный чертёж"}), 404
+    params = request.get_json(silent=True)
+    if not isinstance(params, dict):
+        return jsonify({"status": "error", "response": "Нужен JSON-объект"}), 400
+    try:
+        dxf = entry[0](params)
+    except ValueError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return Response(dxf, mimetype="application/dxf", headers={
+        "Content-Disposition": f"attachment; filename={kind}.dxf"})
+
+
+@app.route("/cad/jobs", methods=["GET", "POST"])
+def cad_jobs():
+    if request.method == "GET":
+        return jsonify({"jobs": cad.list_jobs()})
+    data = request.get_json(silent=True) or {}
+    try:
+        job = cad.create_job(str(data.get("action", "")), data.get("params"))
+    except ValueError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return jsonify({"status": "success", "job": job}), 201
+
+
+@app.route("/cad/jobs/<job_id>")
+def cad_job(job_id):
+    job = cad.get_job(job_id)
+    if not job:
+        return jsonify({"status": "error", "response": "Задание не найдено"}), 404
+    return jsonify({"job": job})
+
+
+@app.route("/cad/bridge/next")
+def cad_bridge_next():
+    denied = _bridge_only()
+    return denied if denied else jsonify({"job": cad.claim_next()})
+
+
+@app.route("/cad/bridge/result/<job_id>", methods=["POST"])
+def cad_bridge_result(job_id):
+    denied = _bridge_only()
+    if denied:
+        return denied
+    data = request.get_json(silent=True) or {}
+    try:
+        job = cad.post_result(job_id, bool(data.get("ok")), data.get("result", {}))
+    except ValueError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return jsonify({"status": "success", "job": job})
 
 
 if __name__ == "__main__":
