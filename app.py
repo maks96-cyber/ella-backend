@@ -1,4 +1,4 @@
-"""Ella backend v1.2.0 — модули 1-2 (ИИ), 7 (арбитраж), 11 (безопасность)."""
+"""Ella backend v1.3.0 — модули 1-2 (ИИ), 7, 9, 11, 13."""
 import hmac
 import os
 import time
@@ -8,6 +8,8 @@ import requests
 from flask import Flask, jsonify, request
 
 import arbitrage
+import geology
+import quantum
 import security
 
 try:
@@ -19,7 +21,7 @@ app = Flask(__name__)
 if CORS:
     CORS(app)
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -41,11 +43,11 @@ MODULES = {
     6: ("Инженерия и САПР (Компас-3D, SolidWorks)", "planned"),
     7: ("Крипто- и финансовый арбитраж", "active"),
     8: ("Спутниковая связь GNSS и Direct-to-Cell", "planned"),
-    9: ("Глубинная геология (4-5+ км)", "planned"),
+    9: ("Глубинная геология (4-5+ км)", "active"),
     10: ("Роботизированное извлечение", "planned"),
     11: ("Кибербезопасность и защита HMAC-SHA256", "active"),
     12: ("Конструирование роботов и шасси", "planned"),
-    13: ("Квантовая физика, энергетика и биология", "planned"),
+    13: ("Квантовая физика, энергетика и биология", "active"),
     14: ("Космическая геологоразведка (Psyche-16)", "planned"),
     15: ("Ионная логистика", "planned"),
     16: ("Сапфировый HUD: данные", "planned"),
@@ -284,6 +286,44 @@ def arbitrage_scan():
         return jsonify(arbitrage.scan(assets))
     except Exception as e:
         return jsonify({"status": "error", "response": f"Сбой модуля 7: {e}"}), 502
+
+
+# ---------- Расчётные модули 9 и 13 ----------
+CALC_DOMAINS = {
+    "geology": (9, geology.CALCS),
+    "quantum": (13, quantum.CALCS),
+}
+
+
+@app.route("/calc/<domain>")
+def calc_list(domain):
+    """GET /calc/geology — список расчётов и их параметров."""
+    entry = CALC_DOMAINS.get(domain)
+    if not entry:
+        return jsonify({"status": "error", "response": "Неизвестный раздел"}), 404
+    mod_id, calcs = entry
+    return jsonify({
+        "module": mod_id,
+        "calcs": {name: params for name, (_, params) in calcs.items()},
+    })
+
+
+@app.route("/calc/<domain>/<name>", methods=["POST"])
+def calc_run(domain, name):
+    """POST /calc/geology/thermal  {"depth_km": 5}"""
+    entry = CALC_DOMAINS.get(domain)
+    if not entry or name not in entry[1]:
+        return jsonify({"status": "error", "response": "Неизвестный расчёт"}), 404
+    mod_id, calcs = entry
+    params = request.get_json(silent=True)
+    if not isinstance(params, dict):
+        return jsonify({"status": "error", "response": "Нужен JSON-объект"}), 400
+    try:
+        result = calcs[name][0](params)
+    except ValueError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return jsonify({"status": "success", "module": mod_id,
+                    "calc": name, "result": result})
 
 
 if __name__ == "__main__":
