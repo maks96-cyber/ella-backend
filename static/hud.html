@@ -1,365 +1,185 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ella AI — Command Center HUD</title>
-    <style>
-        :root {
-            --bg-color: #030712;
-            --panel-bg: rgba(11, 19, 43, 0.75);
-            --panel-border: rgba(0, 180, 216, 0.35);
-            --neon-blue: #00b4d8;
-            --neon-cyan: #48cae4;
-            --sapphire: #0b132b;
-            --accent-green: #10b981;
-            --text-main: #e0f2fe;
-            --text-dim: #94a3b8;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
-            background-image: 
-                radial-gradient(circle at 50% 50%, rgba(11, 19, 43, 0.8) 0%, rgba(3, 7, 18, 0.95) 100%),
-                linear-gradient(rgba(0, 180, 216, 0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 180, 216, 0.03) 1px, transparent 1px);
-            background-size: 100% 100%, 30px 30px, 30px 30px;
-        }
-
-        /* HEADER */
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 24px;
-            background: rgba(11, 19, 43, 0.85);
-            border-bottom: 1px solid var(--panel-border);
-            box-shadow: 0 4px 20px rgba(0, 180, 216, 0.15);
-        }
-
-        .logo-title {
-            font-size: 1.4rem;
-            font-weight: 700;
-            letter-spacing: 2px;
-            color: var(--neon-cyan);
-            text-shadow: 0 0 10px rgba(72, 202, 228, 0.5);
-        }
-
-        .header-status {
-            display: flex;
-            gap: 20px;
-            font-size: 0.85rem;
-            color: var(--text-dim);
-        }
-
-        .status-tag {
-            color: var(--accent-green);
-            font-weight: 600;
-        }
-
-        /* MAIN DASHBOARD GRID */
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: 320px 1fr 340px;
-            gap: 16px;
-            padding: 16px;
-            flex: 1;
-        }
-
-        /* HUD PANEL STYLES */
-        .hud-panel {
-            background: var(--panel-bg);
-            border: 1px solid var(--panel-border);
-            border-radius: 8px;
-            padding: 14px;
-            backdrop-filter: blur(10px);
-            box-shadow: inset 0 0 15px rgba(0, 180, 216, 0.05);
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            position: relative;
-        }
-
-        .hud-panel::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 6px; height: 6px;
-            border-top: 2px solid var(--neon-cyan);
-            border-left: 2px solid var(--neon-cyan);
-        }
-
-        .panel-title {
-            font-size: 0.85rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--neon-cyan);
-            border-bottom: 1px solid rgba(0, 180, 216, 0.2);
-            padding-bottom: 6px;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        /* LEFT & RIGHT COLUMNS */
-        .column {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        /* CENTER CORE */
-        .center-column {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-
-        .core-container {
-            position: relative;
-            width: 280px;
-            height: 280px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .core-ring {
-            position: absolute;
-            border-radius: 50%;
-            border: 2px dashed var(--neon-blue);
-            animation: spin 20s linear infinite;
-        }
-
-        .ring-1 { width: 260px; height: 260px; opacity: 0.4; }
-        .ring-2 { width: 220px; height: 220px; border-style: solid; border-color: rgba(72, 202, 228, 0.2); animation: spin-reverse 15s linear infinite; }
-
-        .sapphire-core {
-            width: 140px;
-            height: 140px;
-            background: radial-gradient(circle, #00b4d8 0%, #0b132b 70%);
-            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-            box-shadow: 0 0 30px var(--neon-blue);
-            animation: pulse 3s ease-in-out infinite;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            letter-spacing: 2px;
-            color: #fff;
-            text-shadow: 0 0 10px var(--neon-cyan);
-        }
-
-        .voice-status {
-            margin-top: 20px;
-            font-size: 1.1rem;
-            letter-spacing: 1.5px;
-            color: var(--neon-cyan);
-            text-shadow: 0 0 8px rgba(72, 202, 228, 0.6);
-            text-align: center;
-        }
-
-        /* DATA METRICS & LISTS */
-        .metric-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.8rem;
-        }
-
-        .metric-value {
-            color: var(--neon-cyan);
-            font-weight: 600;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 4px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--neon-blue), var(--neon-cyan));
-            width: 87%;
-        }
-
-        /* ANIMATIONS */
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        @keyframes spin-reverse { 100% { transform: rotate(-360deg); } }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 25px var(--neon-blue); }
-            50% { transform: scale(1.05); box-shadow: 0 0 45px var(--neon-cyan); }
-        }
-
-        /* RESPONSIVE */
-        @media (max-width: 900px) {
-            .dashboard-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Элла — HUD</title>
+<style>
+:root{--bg:#030a1a;--panel:#07142e;--sap:#0f52ba;--glow:#4aa8ff;--txt:#d6eaff;--dim:#7c98c0;--bad:#ff6b6b;--ok:#4be3b0}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:radial-gradient(circle at 50% 30%,#0a2150 0%,var(--bg) 65%);color:var(--txt);
+ font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;
+ padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #123a7a}
+h1{font-size:18px;letter-spacing:.25em;margin:0;color:var(--glow);text-shadow:0 0 12px var(--sap)}
+#state{font-size:12px;color:var(--dim)}
+#state i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:6px}
+#state.on i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+main{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:88%;padding:10px 14px;border-radius:12px;border:1px solid #123a7a;background:var(--panel);white-space:pre-wrap;word-break:break-word}
+.me{align-self:flex-end;border-color:var(--sap);background:#0b2a63}
+.ella{align-self:flex-start;box-shadow:0 0 14px rgba(15,82,186,.35)}
+.err{border-color:var(--bad);color:var(--bad)}
+.tool{align-self:flex-start;font-size:12px;color:var(--dim);padding:0 6px;margin-top:-4px}
+footer{padding:12px 18px 16px;border-top:1px solid #123a7a;display:flex;flex-direction:column;gap:10px}
+#live{min-height:20px;color:var(--dim);font-size:14px}
+.row{display:flex;gap:8px;align-items:center}
+input,select,button{font:inherit;color:var(--txt);background:var(--panel);border:1px solid #123a7a;border-radius:10px;padding:10px 12px}
+input{flex:1;min-width:0}
+button{cursor:pointer}
+#mic{width:64px;height:64px;border-radius:50%;border:2px solid var(--glow);box-shadow:0 0 18px var(--sap);font-size:26px;padding:0;flex:none}
+#mic.rec{background:var(--sap);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{box-shadow:0 0 34px var(--glow)}}
+#login{position:fixed;inset:0;background:rgba(3,10,26,.96);display:none;align-items:center;justify-content:center;padding:24px;z-index:5}
+#login .box{width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px}
+#loginErr{color:var(--bad);min-height:20px;font-size:14px}
+</style>
 </head>
 <body>
+<header><h1>ЭЛЛА</h1><div id="state"><i></i><span>нет связи</span></div></header>
+<main id="log"></main>
+<footer>
+ <div id="live"></div>
+ <div class="row">
+  <button id="mic" title="Говорить" aria-label="Микрофон">🎙</button>
+  <input id="text" placeholder="Команда текстом…" autocomplete="off">
+  <button id="send">▶</button>
+ </div>
+ <div class="row">
+  <select id="provider"><option value="gemini">Gemini</option><option value="claude">Claude</option></select>
+  <label style="font-size:14px;color:var(--dim)"><input type="checkbox" id="speak" checked style="flex:none"> озвучивать</label>
+ </div>
+</footer>
+<div id="login"><div class="box">
+ <h1>ДОСТУП</h1>
+ <input id="pass" type="password" placeholder="Кодовая фраза" autocomplete="current-password">
+ <button id="enter">Войти</button>
+ <div id="loginErr"></div>
+</div></div>
 
-    <header>
-        <div class="logo-title">ELLA AI // COMMAND HUD</div>
-        <div class="header-status">
-            <div>БЭКЕНД: <span class="status-tag">RENDER ONLINE</span></div>
-            <div>СВЯЗЬ: <span class="status-tag">DIRECT-TO-CELL</span></div>
-            <div>ШИФРОВАНИЕ: <span class="status-tag">HMAC-SHA256</span></div>
-        </div>
-    </header>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const store = {
+  get(k){ try { return sessionStorage.getItem(k); } catch(e){ return null; } },
+  set(k,v){ try { sessionStorage.setItem(k,v); } catch(e){} }
+};
+let token = store.get("ella_token") || "";
+let sessionId = store.get("ella_sid");
+if (!sessionId) { sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set("ella_sid", sessionId); }
 
-    <div class="dashboard-grid">
-        
-        <!-- LEFT COLUMN -->
-        <div class="column">
-            <!-- Geology -->
-            <div class="hud-panel">
-                <div class="panel-title">ГЛУБИННАЯ ГЕОЛОГИЯ <span>4-5+ КМ</span></div>
-                <div class="metric-row">
-                    <span>Статус сканирования:</span>
-                    <span class="metric-value">Завершено</span>
-                </div>
-                <div class="metric-row">
-                    <span>Редкоземельные металлы:</span>
-                    <span class="metric-value">87% вероятности</span>
-                </div>
-                <div class="progress-bar"><div class="progress-fill" style="width: 87%;"></div></div>
-                <div class="metric-row" style="margin-top: 6px;">
-                    <span>Метод извлечения:</span>
-                    <span class="metric-value">Роботизированный забой</span>
-                </div>
-            </div>
+function plain(t){                    // убираем markdown-разметку для показа
+  return String(t).replace(/\*\*|__|`/g, "").replace(/^\s*#+\s*/gm, "")
+    .replace(/^\s*[*-]\s+/gm, "• ").replace(/\*/g, "");
+}
+function add(text, cls){
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = cls === "ella" ? plain(text) : text;   // textContent — без XSS
+  $("log").appendChild(d);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+function setState(on, label){
+  $("state").className = on ? "on" : "";
+  $("state").lastChild.textContent = label;
+}
 
-            <!-- Quantum & Bio -->
-            <div class="hud-panel">
-                <div class="panel-title">КВАНТОВАЯ ЭНЕРГЕТИКА & БИОЛОГИЯ</div>
-                <div class="metric-row">
-                    <span>Формула Планка:</span>
-                    <span class="metric-value">E = h · f</span>
-                </div>
-                <div class="metric-row">
-                    <span>Энергия состояния:</span>
-                    <span class="metric-value">4.3295 eV</span>
-                </div>
-                <div class="metric-row">
-                    <span>Клеточное деление:</span>
-                    <span class="metric-value">Без мутаций (1.0e6)</span>
-                </div>
-            </div>
+async function api(path, opts = {}){
+  const headers = Object.assign({"Content-Type":"application/json"}, opts.headers || {});
+  if (token) headers.Authorization = "Bearer " + token;
+  const r = await fetch(path, Object.assign({}, opts, {headers}));
+  if (r.status === 401) { showLogin(); throw new Error("Нужен вход"); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.response || ("Ошибка " + r.status));
+  return data;
+}
 
-            <!-- Cybersecurity -->
-            <div class="hud-panel">
-                <div class="panel-title">КИБЕРБЕЗОПАСНОСТЬ</div>
-                <div class="metric-row">
-                    <span>Уровень угрозы:</span>
-                    <span class="metric-value" style="color: var(--accent-green);">НИЗКИЙ</span>
-                </div>
-                <div class="metric-row">
-                    <span>Защита API-ключей:</span>
-                    <span class="metric-value">Gemini / Claude OK</span>
-                </div>
-            </div>
-        </div>
+function showLogin(){ $("login").style.display = "flex"; $("pass").focus(); }
 
-        <!-- CENTER COLUMN (VOICE HUD CORE) -->
-        <div class="center-column">
-            <div class="core-container">
-                <div class="core-ring ring-1"></div>
-                <div class="core-ring ring-2"></div>
-                <div class="sapphire-core">ELLA AI</div>
-            </div>
-            <div class="voice-status">ЭЛЛА СЛУШАЕТ...</div>
-        </div>
+async function login(){
+  $("loginErr").textContent = "";
+  try {
+    const r = await fetch("/auth/login", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({passphrase: $("pass").value})});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { $("loginErr").textContent = data.response || "Не удалось войти"; return; }
+    token = data.token; store.set("ella_token", token);
+    $("pass").value = ""; $("login").style.display = "none";
+    await checkStatus();
+  } catch(e){ $("loginErr").textContent = "Нет связи с сервером"; }
+}
 
-        <!-- RIGHT COLUMN -->
-        <div class="column">
-            <!-- Robotics -->
-            <div class="hud-panel">
-                <div class="panel-title">РОБОТОТЕХНИКА & САПР</div>
-                <div class="metric-row">
-                    <span>Тип шасси:</span>
-                    <span class="metric-value">Гусеничный модуль V9</span>
-                </div>
-                <div class="metric-row">
-                    <span>Материалы:</span>
-                    <span class="metric-value">Алюминий Д16Т / Карбон</span>
-                </div>
-                <div class="metric-row">
-                    <span>Экспорт CAD:</span>
-                    <span class="metric-value">Компас-3D / STEP</span>
-                </div>
-            </div>
+async function checkStatus(){
+  try {
+    const s = await api("/status");
+    const active = s.modules.filter(m => m.status === "active").length;
+    setState(true, `онлайн · модулей: ${active}/${s.modules.length}`);
+  } catch(e){ setState(false, "нет связи"); }
+}
 
-            <!-- Space Exploration -->
-            <div class="hud-panel">
-                <div class="panel-title">КОСМИЧЕСКАЯ РАЗВЕДКА</div>
-                <div class="metric-row">
-                    <span>Цель:</span>
-                    <span class="metric-value">Астероид Psyche-16</span>
-                </div>
-                <div class="metric-row">
-                    <span>Состав:</span>
-                    <span class="metric-value">Платиноиды / Fe-Ni</span>
-                </div>
-                <div class="metric-row">
-                    <span>Транспортировка:</span>
-                    <span class="metric-value">Ионная тяга (Δv: 6.2 km/s)</span>
-                </div>
-            </div>
+// ---------- Озвучка (Web Speech API: speechSynthesis) ----------
+function speak(text){
+  if (!$("speak").checked || !("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const clean = text.replace(/[*#`_>|]/g, " ").replace(/\s+/g, " ").slice(0, 1200);
+  const u = new SpeechSynthesisUtterance(clean);
+  u.lang = "ru-RU";
+  const v = speechSynthesis.getVoices().find(v => v.lang && v.lang.toLowerCase().startsWith("ru"));
+  if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
 
-            <!-- Financial Arbitrage -->
-            <div class="hud-panel">
-                <div class="panel-title">КРИПТОАРБИТРАЖ LIVE</div>
-                <div class="metric-row">
-                    <span>Пара:</span>
-                    <span class="metric-value">BTC / USDT</span>
-                </div>
-                <div class="metric-row">
-                    <span>Спред (Binance -> Bybit):</span>
-                    <span class="metric-value" style="color: var(--accent-green);">+2.59%</span>
-                </div>
-                <div class="metric-row">
-                    <span>Рекомендация:</span>
-                    <span class="metric-value">Сделка выгодна</span>
-                </div>
-            </div>
-        </div>
+async function send(command){
+  command = command.trim();
+  if (!command) return;
+  add(command, "me");
+  $("text").value = ""; $("live").textContent = "Элла думает…";
+  try {
+    const r = await api("/command", {method:"POST", body: JSON.stringify(
+      {command, provider: $("provider").value, session_id: sessionId})});
+    add(r.response, "ella");
+    if (r.tools && r.tools.length) add("⚙ расчёт: " + [...new Set(r.tools)].join(", "), "tool");
+    speak(r.response);
+  } catch(e){ add(e.message, "err"); }
+  $("live").textContent = "";
+}
 
-    </div>
+// ---------- Распознавание речи (Web Speech API: SpeechRecognition) ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+if (SR) {
+  rec = new SR();
+  rec.lang = "ru-RU";
+  rec.interimResults = true;
+  rec.continuous = false;
+  rec.onresult = ev => {
+    let interim = "", final = "";
+    for (const res of ev.results) (res.isFinal ? (final += res[0].transcript) : (interim += res[0].transcript));
+    $("live").textContent = interim || final;
+    if (final) send(final);
+  };
+  rec.onerror = ev => { $("live").textContent = "Микрофон: " + ev.error; };
+  rec.onend = () => { listening = false; $("mic").classList.remove("rec"); };
+} else {
+  $("mic").disabled = true;
+  $("live").textContent = "Голосовой ввод не поддерживается этим браузером (нужен Chrome, Edge или Safari). Можно писать текстом.";
+}
 
-    <script>
-        // Имитация пульсации и активности Эллы
-        const voiceStatus = document.querySelector('.voice-status');
-        const states = [
-            "ЭЛЛА СЛУШАЕТ...",
-            "ОБРАБОТКА ДАННЫХ...",
-            "СИНХРОНИЗАЦИЯ С РЕНДЕР...",
-            "СИСТЕМЫ В НОРМЕ"
-        ];
-        let index = 0;
+$("mic").onclick = () => {
+  if (!rec) return;
+  if (listening) { rec.stop(); return; }
+  if ("speechSynthesis" in window) speechSynthesis.cancel();   // не слушаем собственный голос
+  try { rec.start(); listening = true; $("mic").classList.add("rec"); $("live").textContent = "Слушаю…"; }
+  catch(e){ $("live").textContent = "Не удалось включить микрофон"; }
+};
+$("send").onclick = () => send($("text").value);
+$("text").onkeydown = e => { if (e.key === "Enter") send($("text").value); };
+$("enter").onclick = login;
+$("pass").onkeydown = e => { if (e.key === "Enter") login(); };
 
-        setInterval(() => {
-            index = (index + 1) % states.length;
-            voiceStatus.textContent = states[index];
-        }, 4000);
-    </script>
+checkStatus();
+add("Системы Элла на связи. Нажмите на микрофон или введите команду.", "ella");
+</script>
 </body>
 </html>
