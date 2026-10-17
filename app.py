@@ -1,4 +1,4 @@
-"""Ella backend v1.5.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
+"""Ella backend v1.6.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
 import hmac
 import json
 import os
@@ -26,7 +26,7 @@ app = Flask(__name__)
 if CORS:
     CORS(app)
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
@@ -161,6 +161,13 @@ class AIError(Exception):
     pass
 
 
+def _api_error(name: str, r) -> AIError:
+    if r.status_code == 429:
+        return AIError(f"{name}: лимит запросов исчерпан (429). Подождите минуту "
+                       f"или проверьте квоту у провайдера")
+    return AIError(f"{name} API {r.status_code}: {r.text[:200]}")
+
+
 def ask_claude(system: str, history: list, trace: list) -> str:
     if not ANTHROPIC_API_KEY:
         raise AIError("ANTHROPIC_API_KEY не задан")
@@ -183,7 +190,7 @@ def ask_claude(system: str, history: list, trace: list) -> str:
             timeout=REQUEST_TIMEOUT,
         )
         if r.status_code != 200:
-            raise AIError(f"Claude API {r.status_code}: {r.text[:200]}")
+            raise _api_error("Claude", r)
         blocks = r.json().get("content", [])
         uses = [b for b in blocks if b.get("type") == "tool_use"]
         if not uses:
@@ -221,7 +228,7 @@ def ask_gemini(system: str, history: list, trace: list) -> str:
             timeout=REQUEST_TIMEOUT,
         )
         if r.status_code != 200:
-            raise AIError(f"Gemini API {r.status_code}: {r.text[:200]}")
+            raise _api_error("Gemini", r)
         try:
             parts = r.json()["candidates"][0]["content"]["parts"]
         except (KeyError, IndexError):
