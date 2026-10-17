@@ -1,4 +1,5 @@
-"""Ella backend v1.6.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
+"""Ella backend v1.7.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
+import base64
 import hmac
 import json
 import os
@@ -11,6 +12,7 @@ from flask import Flask, Response, g, jsonify, request, send_file
 import arbitrage
 import cad
 import geology
+import pwa
 import quantum
 import robotics
 import security
@@ -23,10 +25,11 @@ except ImportError:
     CORS = None
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # фото в HUD сжимаются до ~0.3 МБ
 if CORS:
     CORS(app)
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
@@ -71,7 +74,11 @@ BASE_PROMPT = (
     "Для численных расчётов (геология, физика, энергетика, инженерия) и текущих котировок "
     "ВСЕГДА вызывай доступные инструменты, а не считай в уме; если инструмент вернул "
     "ошибку — объясни её и попроси недостающие данные. Называй числа с единицами измерения "
-    "и упоминай допущения расчёта."
+    "и упоминай допущения расчёта. "
+    "Если к сообщению приложено фото: сначала кратко скажи, что на нём; чертежи, схемы, "
+    "карты, разрезы и образцы породы разбирай по частям, читай размеры и подписи и "
+    "отмечай, где не уверена. По лицам не определяй, кто это, и не ставь медицинских "
+    "диагнозов по фото."
 )
 
 # Доменные персоны для маршрутизации по ключевым словам
@@ -118,7 +125,13 @@ _sessions = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 
 # ---------- Вспомогательные функции ----------
-OPEN_PATHS = ("/", "/health", "/hud", "/auth/login")
+@app.errorhandler(413)
+def too_large(_e):
+    return jsonify({"status": "error", "response": "Запрос слишком большой (максимум 6 МБ)"}), 413
+
+
+OPEN_PATHS = ("/", "/health", "/hud", "/auth/login", "/manifest.webmanifest",
+              "/sw.js", "/icon-192.png", "/icon-512.png")
 
 
 @app.before_request
@@ -161,6 +174,32 @@ class AIError(Exception):
     pass
 
 
+IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
+_MAGIC = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG\r\n\x1a\n", "image/webp": b"RIFF"}
+
+
+def parse_image(raw):
+    """Проверяет фото из запроса. Возвращает ({mime, data}, None) или (None, текст ошибки)."""
+    if not isinstance(raw, dict):
+        return None, "image: нужен объект {mime, data}"
+    mime = str(raw.get("mime", "")).lower()
+    data = raw.get("data")
+    if mime not in IMAGE_MIMES:
+        return None, "Поддерживаются фото JPEG, PNG и WEBP"
+    if not isinstance(data, str) or not data:
+        return None, "Фото пустое"
+    try:
+        blob = base64.b64decode(data, validate=True)
+    except Exception:
+        return None, "Фото повреждено (неверный base64)"
+    if len(blob) > MAX_IMAGE_BYTES:
+        return None, "Фото слишком большое (максимум 4 МБ)"
+    if not blob.startswith(_MAGIC[mime]) or (mime == "image/webp" and blob[8:12] != b"WEBP"):
+        return None, "Файл не похож на изображение"
+    return {"mime": mime, "data": data}, None
+
+
 def _api_error(name: str, r) -> AIError:
     if r.status_code == 429:
         return AIError(f"{name}: лимит запросов исчерпан (429). Подождите минуту "
@@ -168,10 +207,17 @@ def _api_error(name: str, r) -> AIError:
     return AIError(f"{name} API {r.status_code}: {r.text[:200]}")
 
 
-def ask_claude(system: str, history: list, trace: list) -> str:
+def ask_claude(system: str, history: list, trace: list, image=None) -> str:
     if not ANTHROPIC_API_KEY:
         raise AIError("ANTHROPIC_API_KEY не задан")
     messages = list(history)
+    if image:
+        last = messages[-1]
+        messages[-1] = {"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64",
+                                         "media_type": image["mime"], "data": image["data"]}},
+            {"type": "text", "text": last["content"]},
+        ]}
     for _ in range(MAX_TOOL_ROUNDS + 1):
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -206,7 +252,7 @@ def ask_claude(system: str, history: list, trace: list) -> str:
     raise AIError("слишком много вызовов инструментов подряд")
 
 
-def ask_gemini(system: str, history: list, trace: list) -> str:
+def ask_gemini(system: str, history: list, trace: list, image=None) -> str:
     if not GEMINI_API_KEY:
         raise AIError("GEMINI_API_KEY не задан")
     contents = [
@@ -214,6 +260,9 @@ def ask_gemini(system: str, history: list, trace: list) -> str:
          "parts": [{"text": m["content"]}]}
         for m in history
     ]
+    if image:
+        contents[-1]["parts"].append(
+            {"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
     for _ in range(MAX_TOOL_ROUNDS + 1):
         r = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/"
@@ -251,7 +300,7 @@ def ask_gemini(system: str, history: list, trace: list) -> str:
 PROVIDERS = {"claude": ask_claude, "gemini": ask_gemini}
 
 
-def ask_ai(text: str, provider: str, session_id: str, explicit_module=None):
+def ask_ai(text: str, provider: str, session_id: str, explicit_module=None, image=None):
     """Возвращает (ответ, провайдер, модуль, инструменты). При сбое пробует второго."""
     mod_id = pick_module(text, explicit_module)
     system = build_system_prompt(mod_id)
@@ -262,11 +311,12 @@ def ask_ai(text: str, provider: str, session_id: str, explicit_module=None):
     for name in order:
         try:
             trace = []
-            answer = PROVIDERS[name](system, history, trace)
+            answer = PROVIDERS[name](system, history, trace, image)
         except (AIError, requests.RequestException) as e:
             errors.append(f"{name}: {e}")
             continue
-        _sessions[session_id].append({"role": "user", "content": text})
+        _sessions[session_id].append({"role": "user", "content": text + (
+            " [к сообщению было приложено фото]" if image else "")})
         _sessions[session_id].append({"role": "assistant", "content": answer})
         return answer, name, mod_id, trace
     raise AIError("; ".join(errors))
@@ -302,15 +352,23 @@ def status():
 def handle_command():
     data = request.get_json(silent=True) or {}
     command = str(data.get("command", "")).strip()
+    image = None
+    if data.get("image") is not None:
+        image, err = parse_image(data["image"])
+        if err:
+            return jsonify({"status": "error", "response": err}), 400
+        if not command:
+            command = "Опиши, что на фото, и разбери подробно."
     if not command:
         return jsonify({"status": "error", "response": "Пустая команда"}), 400
 
     low = command.lower()
+    local = image is None  # с фото всегда идём к ИИ
     # Локальные команды — без обращения к ИИ
-    if "привет" in low:
+    if local and "привет" in low:
         return jsonify({"status": "success",
                         "response": "Привет! Системы Элла активированы."})
-    if "статус" in low:
+    if local and "статус" in low:
         count = lambda st: sum(1 for _, s in MODULES.values() if s == st)
         return jsonify({
             "status": "success",
@@ -319,7 +377,7 @@ def handle_command():
                         f"в плане {count('planned')}. Подробности — GET /status.",
         })
 
-    if any(w in low for w in ("арбитраж", "спред")):
+    if local and any(w in low for w in ("арбитраж", "спред")):
         try:
             text = arbitrage.summarize(arbitrage.scan())
         except Exception as e:
@@ -335,7 +393,7 @@ def handle_command():
     explicit = explicit if isinstance(explicit, int) else None
 
     try:
-        answer, used, mod_id, used_tools = ask_ai(command, provider, session_id, explicit)
+        answer, used, mod_id, used_tools = ask_ai(command, provider, session_id, explicit, image)
     except AIError as e:
         return jsonify({"status": "error", "response": f"Сбой ИИ: {e}"}), 502
 
@@ -418,6 +476,32 @@ def auth_login():
         return jsonify({"status": "error", "response": "Неверная кодовая фраза"}), 401
     token, exp = security.issue_token()
     return jsonify({"status": "success", "token": token, "expires_at": exp})
+
+
+# ---------- Приложение (PWA): манифест, service worker, иконки ----------
+@app.route("/manifest.webmanifest")
+def pwa_manifest():
+    resp = Response(json.dumps(pwa.MANIFEST, ensure_ascii=False),
+                    mimetype="application/manifest+json")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/sw.js")
+def pwa_sw():
+    resp = Response(pwa.SERVICE_WORKER, mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/icon-<int:size>.png")
+def pwa_icon(size):
+    if size not in (192, 512):
+        return jsonify({"status": "error", "response": "Нет такой иконки"}), 404
+    resp = Response(pwa.icon_png(size), mimetype="image/png")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 # ---------- Модуль 6: САПР ----------
