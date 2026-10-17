@@ -3,298 +3,363 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ELLA — AI Command Center</title>
+    <title>Ella AI — Command Center HUD</title>
     <style>
         :root {
             --bg-color: #030712;
-            --accent-blue: #00d2ff;
-            --accent-sapphire: #3a86ff;
-            --glow-color: rgba(0, 210, 255, 0.4);
-            --text-color: #e2e8f0;
-            --panel-bg: rgba(15, 23, 42, 0.75);
+            --panel-bg: rgba(11, 19, 43, 0.75);
+            --panel-border: rgba(0, 180, 216, 0.35);
+            --neon-blue: #00b4d8;
+            --neon-cyan: #48cae4;
+            --sapphire: #0b132b;
+            --accent-green: #10b981;
+            --text-main: #e0f2fe;
+            --text-dim: #94a3b8;
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
 
         body {
             background-color: var(--bg-color);
-            color: var(--text-color);
+            color: var(--text-main);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            padding: 20px;
             overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(11, 19, 43, 0.8) 0%, rgba(3, 7, 18, 0.95) 100%),
+                linear-gradient(rgba(0, 180, 216, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 180, 216, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 30px 30px, 30px 30px;
         }
 
-        /* HUD Header */
+        /* HEADER */
         header {
-            width: 100%;
-            max-width: 800px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 15px 20px;
-            background: var(--panel-bg);
-            border: 1px solid rgba(0, 210, 255, 0.2);
-            border-radius: 12px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 0 15px var(--glow-color);
+            padding: 12px 24px;
+            background: rgba(11, 19, 43, 0.85);
+            border-bottom: 1px solid var(--panel-border);
+            box-shadow: 0 4px 20px rgba(0, 180, 216, 0.15);
         }
 
-        .title {
+        .logo-title {
             font-size: 1.4rem;
             font-weight: 700;
             letter-spacing: 2px;
-            color: var(--accent-blue);
-            text-shadow: 0 0 8px var(--accent-blue);
+            color: var(--neon-cyan);
+            text-shadow: 0 0 10px rgba(72, 202, 228, 0.5);
         }
 
-        .status-badge {
-            font-size: 0.85rem;
-            padding: 5px 12px;
-            border-radius: 20px;
-            background: rgba(0, 255, 136, 0.1);
-            color: #00ff88;
-            border: 1px solid #00ff88;
+        .header-status {
             display: flex;
+            gap: 20px;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+        }
+
+        .status-tag {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* MAIN DASHBOARD GRID */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr 340px;
+            gap: 16px;
+            padding: 16px;
+            flex: 1;
+        }
+
+        /* HUD PANEL STYLES */
+        .hud-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 14px;
+            backdrop-filter: blur(10px);
+            box-shadow: inset 0 0 15px rgba(0, 180, 216, 0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+        }
+
+        .hud-panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 6px; height: 6px;
+            border-top: 2px solid var(--neon-cyan);
+            border-left: 2px solid var(--neon-cyan);
+        }
+
+        .panel-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--neon-cyan);
+            border-bottom: 1px solid rgba(0, 180, 216, 0.2);
+            padding-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* LEFT & RIGHT COLUMNS */
+        .column {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* CENTER CORE */
+        .center-column {
+            display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 6px;
+            justify-content: center;
+            position: relative;
         }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            background-color: #00ff88;
-            border-radius: 50%;
-            box-shadow: 0 0 8px #00ff88;
-        }
-
-        /* Sapphire Core Animation */
         .core-container {
             position: relative;
-            margin: 30px 0;
+            width: 280px;
+            height: 280px;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
         }
 
         .core-ring {
-            width: 180px;
-            height: 180px;
-            border-radius: 50%;
-            border: 2px dashed var(--accent-blue);
-            animation: rotateRing 12s linear infinite;
             position: absolute;
-        }
-
-        .core-glow {
-            width: 120px;
-            height: 120px;
             border-radius: 50%;
-            background: radial-gradient(circle, var(--accent-blue) 0%, var(--accent-sapphire) 60%, transparent 100%);
-            box-shadow: 0 0 35px var(--accent-blue);
-            animation: pulseGlow 3s ease-in-out infinite alternate;
+            border: 2px dashed var(--neon-blue);
+            animation: spin 20s linear infinite;
         }
 
-        @keyframes rotateRing {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
+        .ring-1 { width: 260px; height: 260px; opacity: 0.4; }
+        .ring-2 { width: 220px; height: 220px; border-style: solid; border-color: rgba(72, 202, 228, 0.2); animation: spin-reverse 15s linear infinite; }
 
-        @keyframes pulseGlow {
-            0% { transform: scale(0.95); opacity: 0.8; }
-            100% { transform: scale(1.08); opacity: 1; box-shadow: 0 0 50px var(--accent-blue); }
-        }
-
-        /* Console Output */
-        .console {
-            width: 100%;
-            max-width: 800px;
-            height: 320px;
-            background: var(--panel-bg);
-            border: 1px solid rgba(0, 210, 255, 0.2);
-            border-radius: 12px;
-            padding: 15px;
-            overflow-y: auto;
-            backdrop-filter: blur(10px);
+        .sapphire-core {
+            width: 140px;
+            height: 140px;
+            background: radial-gradient(circle, #00b4d8 0%, #0b132b 70%);
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            box-shadow: 0 0 30px var(--neon-blue);
+            animation: pulse 3s ease-in-out infinite;
             display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .message {
-            padding: 10px 14px;
-            border-radius: 8px;
-            max-width: 85%;
-            font-size: 0.95rem;
-            line-height: 1.4;
-        }
-
-        .message.system {
-            align-self: flex-start;
-            background: rgba(58, 134, 255, 0.15);
-            border-left: 3px solid var(--accent-sapphire);
-            color: #dbeaff;
-        }
-
-        .message.user {
-            align-self: flex-end;
-            background: rgba(0, 210, 255, 0.2);
-            border-right: 3px solid var(--accent-blue);
-            color: #ffffff;
-        }
-
-        /* Input Controls */
-        .input-bar {
-            width: 100%;
-            max-width: 800px;
-            display: flex;
-            gap: 10px;
-        }
-
-        input[type="text"] {
-            flex: 1;
-            padding: 14px 18px;
-            background: var(--panel-bg);
-            border: 1px solid rgba(0, 210, 255, 0.3);
-            border-radius: 10px;
-            color: #fff;
-            font-size: 1rem;
-            outline: none;
-            backdrop-filter: blur(10px);
-        }
-
-        input[type="text"]:focus {
-            border-color: var(--accent-blue);
-            box-shadow: 0 0 10px var(--glow-color);
-        }
-
-        button {
-            padding: 14px 20px;
-            background: linear-gradient(135deg, var(--accent-sapphire), var(--accent-blue));
-            border: none;
-            border-radius: 10px;
-            color: #fff;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        button:hover {
-            opacity: 0.9;
-            box-shadow: 0 0 12px var(--glow-color);
-        }
-
-        .mic-btn {
-            background: rgba(15, 23, 42, 0.9);
-            border: 1px solid var(--accent-blue);
-            width: 50px;
-            display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: #fff;
+            text-shadow: 0 0 10px var(--neon-cyan);
+        }
+
+        .voice-status {
+            margin-top: 20px;
+            font-size: 1.1rem;
+            letter-spacing: 1.5px;
+            color: var(--neon-cyan);
+            text-shadow: 0 0 8px rgba(72, 202, 228, 0.6);
+            text-align: center;
+        }
+
+        /* DATA METRICS & LISTS */
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+        }
+
+        .metric-value {
+            color: var(--neon-cyan);
+            font-weight: 600;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--neon-blue), var(--neon-cyan));
+            width: 87%;
+        }
+
+        /* ANIMATIONS */
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes spin-reverse { 100% { transform: rotate(-360deg); } }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 25px var(--neon-blue); }
+            50% { transform: scale(1.05); box-shadow: 0 0 45px var(--neon-cyan); }
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 900px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
 
     <header>
-        <div class="title">ELLA HUD</div>
-        <div class="status-badge">
-            <div class="status-dot"></div>
-            <span>ONLINE</span>
+        <div class="logo-title">ELLA AI // COMMAND HUD</div>
+        <div class="header-status">
+            <div>БЭКЕНД: <span class="status-tag">RENDER ONLINE</span></div>
+            <div>СВЯЗЬ: <span class="status-tag">DIRECT-TO-CELL</span></div>
+            <div>ШИФРОВАНИЕ: <span class="status-tag">HMAC-SHA256</span></div>
         </div>
     </header>
 
-    <div class="core-container">
-        <div class="core-ring"></div>
-        <div class="core-glow"></div>
-    </div>
+    <div class="dashboard-grid">
+        
+        <!-- LEFT COLUMN -->
+        <div class="column">
+            <!-- Geology -->
+            <div class="hud-panel">
+                <div class="panel-title">ГЛУБИННАЯ ГЕОЛОГИЯ <span>4-5+ КМ</span></div>
+                <div class="metric-row">
+                    <span>Статус сканирования:</span>
+                    <span class="metric-value">Завершено</span>
+                </div>
+                <div class="metric-row">
+                    <span>Редкоземельные металлы:</span>
+                    <span class="metric-value">87% вероятности</span>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" style="width: 87%;"></div></div>
+                <div class="metric-row" style="margin-top: 6px;">
+                    <span>Метод извлечения:</span>
+                    <span class="metric-value">Роботизированный забой</span>
+                </div>
+            </div>
 
-    <div class="console" id="console">
-        <div class="message system">
-            <strong>[ELLA System]:</strong> Система автоматизации и модуль управления готовы. Ожидаю указаний.
+            <!-- Quantum & Bio -->
+            <div class="hud-panel">
+                <div class="panel-title">КВАНТОВАЯ ЭНЕРГЕТИКА & БИОЛОГИЯ</div>
+                <div class="metric-row">
+                    <span>Формула Планка:</span>
+                    <span class="metric-value">E = h · f</span>
+                </div>
+                <div class="metric-row">
+                    <span>Энергия состояния:</span>
+                    <span class="metric-value">4.3295 eV</span>
+                </div>
+                <div class="metric-row">
+                    <span>Клеточное деление:</span>
+                    <span class="metric-value">Без мутаций (1.0e6)</span>
+                </div>
+            </div>
+
+            <!-- Cybersecurity -->
+            <div class="hud-panel">
+                <div class="panel-title">КИБЕРБЕЗОПАСНОСТЬ</div>
+                <div class="metric-row">
+                    <span>Уровень угрозы:</span>
+                    <span class="metric-value" style="color: var(--accent-green);">НИЗКИЙ</span>
+                </div>
+                <div class="metric-row">
+                    <span>Защита API-ключей:</span>
+                    <span class="metric-value">Gemini / Claude OK</span>
+                </div>
+            </div>
         </div>
-    </div>
 
-    <div class="input-bar">
-        <button class="mic-btn" id="micBtn" onclick="toggleVoice()">🎙️</button>
-        <input type="text" id="userInput" placeholder="Введите команду или геологические координаты..." onkeypress="handleKeyPress(event)">
-        <button onclick="sendCommand()">Отправить</button>
+        <!-- CENTER COLUMN (VOICE HUD CORE) -->
+        <div class="center-column">
+            <div class="core-container">
+                <div class="core-ring ring-1"></div>
+                <div class="core-ring ring-2"></div>
+                <div class="sapphire-core">ELLA AI</div>
+            </div>
+            <div class="voice-status">ЭЛЛА СЛУШАЕТ...</div>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="column">
+            <!-- Robotics -->
+            <div class="hud-panel">
+                <div class="panel-title">РОБОТОТЕХНИКА & САПР</div>
+                <div class="metric-row">
+                    <span>Тип шасси:</span>
+                    <span class="metric-value">Гусеничный модуль V9</span>
+                </div>
+                <div class="metric-row">
+                    <span>Материалы:</span>
+                    <span class="metric-value">Алюминий Д16Т / Карбон</span>
+                </div>
+                <div class="metric-row">
+                    <span>Экспорт CAD:</span>
+                    <span class="metric-value">Компас-3D / STEP</span>
+                </div>
+            </div>
+
+            <!-- Space Exploration -->
+            <div class="hud-panel">
+                <div class="panel-title">КОСМИЧЕСКАЯ РАЗВЕДКА</div>
+                <div class="metric-row">
+                    <span>Цель:</span>
+                    <span class="metric-value">Астероид Psyche-16</span>
+                </div>
+                <div class="metric-row">
+                    <span>Состав:</span>
+                    <span class="metric-value">Платиноиды / Fe-Ni</span>
+                </div>
+                <div class="metric-row">
+                    <span>Транспортировка:</span>
+                    <span class="metric-value">Ионная тяга (Δv: 6.2 km/s)</span>
+                </div>
+            </div>
+
+            <!-- Financial Arbitrage -->
+            <div class="hud-panel">
+                <div class="panel-title">КРИПТОАРБИТРАЖ LIVE</div>
+                <div class="metric-row">
+                    <span>Пара:</span>
+                    <span class="metric-value">BTC / USDT</span>
+                </div>
+                <div class="metric-row">
+                    <span>Спред (Binance -> Bybit):</span>
+                    <span class="metric-value" style="color: var(--accent-green);">+2.59%</span>
+                </div>
+                <div class="metric-row">
+                    <span>Рекомендация:</span>
+                    <span class="metric-value">Сделка выгодна</span>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        const API_URL = "https://ella-backend-yq1s.onrender.com/command";
+        // Имитация пульсации и активности Эллы
+        const voiceStatus = document.querySelector('.voice-status');
+        const states = [
+            "ЭЛЛА СЛУШАЕТ...",
+            "ОБРАБОТКА ДАННЫХ...",
+            "СИНХРОНИЗАЦИЯ С РЕНДЕР...",
+            "СИСТЕМЫ В НОРМЕ"
+        ];
+        let index = 0;
 
-        async function sendCommand() {
-            const input = document.getElementById("userInput");
-            const text = input.value.trim();
-            if (!text) return;
-
-            appendMessage("user", text);
-            input.value = "";
-
-            try {
-                const response = await fetch(API_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ command: text })
-                });
-
-                const data = await response.json();
-                appendMessage("system", data.response || JSON.stringify(data));
-            } catch (err) {
-                appendMessage("system", " Ошибка соединения с бэкендом: " + err.message);
-            }
-        }
-
-        function appendMessage(sender, text) {
-            const consoleBox = document.getElementById("console");
-            const msg = document.createElement("div");
-            msg.className = `message ${sender}`;
-            msg.innerHTML = `<strong>[${sender === 'user' ? 'Вы' : 'ELLA'}]:</strong> ${text}`;
-            consoleBox.appendChild(msg);
-            consoleBox.scrollTop = consoleBox.scrollHeight;
-        }
-
-        function handleKeyPress(e) {
-            if (e.key === 'Enter') sendCommand();
-        }
-
-        // Voice Input Integration
-        function toggleVoice() {
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                alert("Голосовой ввод не поддерживается вашим браузером.");
-                return;
-            }
-
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition();
-            recognition.lang = 'ru-RU';
-
-            recognition.onstart = () => {
-                document.getElementById("micBtn").style.borderColor = "#00ff88";
-            };
-
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                document.getElementById("userInput").value = transcript;
-                sendCommand();
-            };
-
-            recognition.onend = () => {
-                document.getElementById("micBtn").style.borderColor = "var(--accent-blue)";
-            };
-
-            recognition.start();
-        }
+        setInterval(() => {
+            index = (index + 1) % states.length;
+            voiceStatus.textContent = states[index];
+        }, 4000);
     </script>
 </body>
 </html>
