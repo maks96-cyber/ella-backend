@@ -175,5 +175,5 @@ def add_security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
-    resp.headers["Cache-Control"] = "no-store"
+    resp.headers.setdefault("Cache-Control", "no-store")
     return resp
