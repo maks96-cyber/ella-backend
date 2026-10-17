@@ -6,8 +6,10 @@
 
 Заголовки запроса: X-Ella-Timestamp, X-Ella-Nonce, X-Ella-Signature.
 """
+import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import threading
@@ -21,10 +23,14 @@ LEGACY_TOKEN = os.getenv("ELLA_API_TOKEN", "")  # запасной режим б
 MAX_SKEW = int(os.getenv("ELLA_MAX_SKEW", "60"))  # допуск по времени, сек
 RATE_LIMIT = int(os.getenv("ELLA_RATE_LIMIT", "30"))  # запросов в минуту с IP
 RATE_WINDOW = 60
+LOGIN_PASSPHRASE = os.getenv("ELLA_LOGIN_PASSPHRASE", "")  # вход в HUD
+SESSION_TTL = int(os.getenv("ELLA_SESSION_TTL", "3600"))  # жизнь токена, сек
+LOGIN_ATTEMPTS = 5  # попыток входа в минуту с IP
 
 _lock = threading.Lock()
 _nonces = {}  # nonce -> время истечения
 _hits = defaultdict(deque)  # ip -> времена запросов
+_login_hits = defaultdict(deque)
 
 
 def auth_mode() -> str:
@@ -49,45 +55,99 @@ def _request_path(req) -> str:
     return req.path + (f"?{qs}" if qs else "")
 
 
+# ---------- Сессионные токены для браузерного HUD ----------
+def _session_key() -> bytes:
+    return hmac.new(HMAC_SECRET, b"ella-session-v1", hashlib.sha256).digest()
+
+
+def login_configured() -> bool:
+    return bool(HMAC_SECRET and LOGIN_PASSPHRASE)
+
+
+def check_login(passphrase: str) -> bool:
+    return login_configured() and hmac.compare_digest(
+        passphrase.encode(), LOGIN_PASSPHRASE.encode())
+
+
+def issue_token():
+    exp = int(time.time()) + SESSION_TTL
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).rstrip(b"=")
+    sig = hmac.new(_session_key(), payload, hashlib.sha256).hexdigest()
+    return f"{payload.decode()}.{sig}", exp
+
+
+def _verify_token(token: str) -> bool:
+    try:
+        payload_b64, sig = token.split(".", 1)
+        expected = hmac.new(_session_key(), payload_b64.encode(),
+                            hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected.encode(), sig.encode()):
+            return False
+        pad = "=" * (-len(payload_b64) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload_b64 + pad))
+        return int(data["exp"]) > time.time()
+    except Exception:
+        return False
+
+
+def login_rate_limited(ip: str) -> bool:
+    now = time.time()
+    with _lock:
+        q = _login_hits[ip]
+        while q and now - q[0] > RATE_WINDOW:
+            q.popleft()
+        if len(q) >= LOGIN_ATTEMPTS:
+            return True
+        q.append(now)
+        return False
+
+
 def verify_request(req):
-    """Возвращает (ok, причина). Причину пишем в лог, клиенту не раскрываем."""
+    """Возвращает (ok, причина, метод). Метод: hmac | bearer | token | open.
+    Причину пишем в лог, клиенту не раскрываем."""
+    auth = req.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        if HMAC_SECRET and _verify_token(auth[7:]):
+            return True, "ok", "bearer"
+        return False, "bad bearer", None
+
     if HMAC_SECRET:
         ts = req.headers.get("X-Ella-Timestamp", "")
         nonce = req.headers.get("X-Ella-Nonce", "")
         sig = req.headers.get("X-Ella-Signature", "")
         if not (ts and nonce and sig):
-            return False, "missing signature headers"
+            return False, "missing signature headers", None
         try:
             ts_int = int(ts)
         except ValueError:
-            return False, "bad timestamp"
+            return False, "bad timestamp", None
         now = int(time.time())
         if abs(now - ts_int) > MAX_SKEW:
-            return False, "stale timestamp"
+            return False, "stale timestamp", None
         if not 8 <= len(nonce) <= 64:
-            return False, "bad nonce"
+            return False, "bad nonce", None
 
         expected = sign(HMAC_SECRET, req.method, _request_path(req), ts,
                         nonce, req.get_data())
         if not hmac.compare_digest(expected.encode(), sig.encode()):
-            return False, "bad signature"
+            return False, "bad signature", None
 
         # Проверка повтора — только после валидной подписи
         with _lock:
             for n in [n for n, exp in _nonces.items() if exp < now]:
                 del _nonces[n]
             if nonce in _nonces:
-                return False, "replayed nonce"
+                return False, "replayed nonce", None
             _nonces[nonce] = now + MAX_SKEW * 2
-        return True, "ok"
+        return True, "ok", "hmac"
 
     if LEGACY_TOKEN:
         sent = req.headers.get("X-Ella-Token", "")
         if hmac.compare_digest(sent.encode(), LEGACY_TOKEN.encode()):
-            return True, "ok"
-        return False, "bad token"
+            return True, "ok", "token"
+        return False, "bad token", None
 
-    return True, "open"
+    return True, "open", "open"
 
 
 def client_ip(req) -> str:
