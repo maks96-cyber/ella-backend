@@ -1,4 +1,4 @@
-"""Ella backend v1.1.0 — этап 1: интеграция Gemini / Claude (модули 1-2)."""
+"""Ella backend v1.2.0 — модули 1-2 (ИИ), 7 (арбитраж), 11 (безопасность)."""
 import hmac
 import os
 import time
@@ -6,6 +6,9 @@ from collections import defaultdict, deque
 
 import requests
 from flask import Flask, jsonify, request
+
+import arbitrage
+import security
 
 try:
     from flask_cors import CORS  # нужен для HUD-фронтенда в браузере
@@ -16,7 +19,7 @@ app = Flask(__name__)
 if CORS:
     CORS(app)
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -24,7 +27,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "claude")  # claude | gemini
-ELLA_API_TOKEN = os.getenv("ELLA_API_TOKEN", "")  # если пусто — защита выключена
 REQUEST_TIMEOUT = 60
 MAX_HISTORY = 12  # сообщений на сессию (хранится в памяти процесса)
 
@@ -37,11 +39,11 @@ MODULES = {
     4: ("Голосовой интерфейс и распознавание речи", "planned"),
     5: ("Духовные знания", "planned"),
     6: ("Инженерия и САПР (Компас-3D, SolidWorks)", "planned"),
-    7: ("Крипто- и финансовый арбитраж", "planned"),
+    7: ("Крипто- и финансовый арбитраж", "active"),
     8: ("Спутниковая связь GNSS и Direct-to-Cell", "planned"),
     9: ("Глубинная геология (4-5+ км)", "planned"),
     10: ("Роботизированное извлечение", "planned"),
-    11: ("Кибербезопасность и защита HMAC-SHA256", "planned"),
+    11: ("Кибербезопасность и защита HMAC-SHA256", "active"),
     12: ("Конструирование роботов и шасси", "planned"),
     13: ("Квантовая физика, энергетика и биология", "planned"),
     14: ("Космическая геологоразведка (Psyche-16)", "planned"),
@@ -85,11 +87,24 @@ _sessions = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 
 # ---------- Вспомогательные функции ----------
-def authorized() -> bool:
-    if not ELLA_API_TOKEN:
-        return True
-    sent = request.headers.get("X-Ella-Token", "")
-    return hmac.compare_digest(sent, ELLA_API_TOKEN)
+@app.before_request
+def guard():
+    """Модуль 11: rate limit + проверка подписи для всех путей, кроме / и /health."""
+    if request.method == "OPTIONS" or request.path in ("/", "/health"):
+        return None
+    ip = security.client_ip(request)
+    if security.rate_limited(ip):
+        return jsonify({"status": "error", "response": "Слишком много запросов"}), 429
+    ok, reason = security.verify_request(request)
+    if not ok:
+        app.logger.warning("auth denied ip=%s path=%s reason=%s", ip, request.path, reason)
+        return jsonify({"status": "error", "response": "Нет доступа"}), 401
+    return None
+
+
+@app.after_request
+def secure(resp):
+    return security.add_security_headers(resp)
 
 
 def pick_module(text: str, explicit=None) -> int:
@@ -200,10 +215,9 @@ def health():
 
 @app.route("/status")
 def status():
-    if not authorized():
-        return jsonify({"status": "error", "response": "Нет доступа"}), 401
     return jsonify({
         "version": VERSION,
+        "auth_mode": security.auth_mode(),
         "providers": {
             "claude": {"configured": bool(ANTHROPIC_API_KEY), "model": CLAUDE_MODEL},
             "gemini": {"configured": bool(GEMINI_API_KEY), "model": GEMINI_MODEL},
@@ -216,9 +230,6 @@ def status():
 
 @app.route("/command", methods=["POST"])
 def handle_command():
-    if not authorized():
-        return jsonify({"status": "error", "response": "Нет доступа"}), 401
-
     data = request.get_json(silent=True) or {}
     command = str(data.get("command", "")).strip()
     if not command:
@@ -236,6 +247,14 @@ def handle_command():
             "response": f"Активно модулей: {active} из {len(MODULES)}. "
                         f"Подробности — GET /status.",
         })
+
+    if any(w in low for w in ("арбитраж", "спред")):
+        try:
+            text = arbitrage.summarize(arbitrage.scan())
+        except Exception as e:
+            return jsonify({"status": "error",
+                            "response": f"Сбой модуля 7: {e}"}), 502
+        return jsonify({"status": "success", "response": text, "module": 7})
 
     provider = str(data.get("provider", DEFAULT_PROVIDER)).lower()
     if provider not in PROVIDERS:
@@ -255,6 +274,16 @@ def handle_command():
         "provider": used,
         "module": mod_id,
     })
+
+
+@app.route("/arbitrage/scan")
+def arbitrage_scan():
+    """GET /arbitrage/scan?assets=BTC,ETH — публичные котировки и спреды."""
+    assets = [a for a in request.args.get("assets", "").split(",") if a] or None
+    try:
+        return jsonify(arbitrage.scan(assets))
+    except Exception as e:
+        return jsonify({"status": "error", "response": f"Сбой модуля 7: {e}"}), 502
 
 
 if __name__ == "__main__":
