@@ -46,7 +46,7 @@ button{cursor:pointer}
   <button id="send">▶</button>
  </div>
  <div class="row">
-  <select id="provider"><option value="claude">Claude</option><option value="gemini">Gemini</option></select>
+  <select id="provider"><option value="gemini">Gemini</option><option value="claude">Claude</option></select>
   <label style="font-size:14px;color:var(--dim)"><input type="checkbox" id="speak" checked style="flex:none"> озвучивать</label>
  </div>
 </footer>
@@ -68,10 +68,14 @@ let token = store.get("ella_token") || "";
 let sessionId = store.get("ella_sid");
 if (!sessionId) { sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set("ella_sid", sessionId); }
 
+function plain(t){                    // убираем markdown-разметку для показа
+  return String(t).replace(/\*\*|__|`/g, "").replace(/^\s*#+\s*/gm, "")
+    .replace(/^\s*[*-]\s+/gm, "• ").replace(/\*/g, "");
+}
 function add(text, cls){
   const d = document.createElement("div");
   d.className = "msg " + cls;
-  d.textContent = text;               // textContent — без XSS
+  d.textContent = cls === "ella" ? plain(text) : text;   // textContent — без XSS
   $("log").appendChild(d);
   $("log").scrollTop = $("log").scrollHeight;
 }
