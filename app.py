@@ -1,8 +1,9 @@
-"""Ella backend v1.7.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
+"""Ella backend v1.8.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
 import base64
 import hmac
 import json
 import os
+import threading
 import time
 from collections import defaultdict, deque
 
@@ -11,6 +12,7 @@ from flask import Flask, Response, g, jsonify, request, send_file
 
 import arbitrage
 import cad
+import charts
 import geology
 import pwa
 import quantum
@@ -29,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # фото в HUD сжима
 if CORS:
     CORS(app)
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
@@ -125,6 +127,20 @@ _sessions = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 
 # ---------- Вспомогательные функции ----------
+START_TIME = time.time()
+_stats_lock = threading.Lock()
+STATS = {"commands": 0, "local": 0, "ai_ok": {}, "ai_errors": 0, "photos": 0, "tools": {}}
+
+
+def _bump(key, sub=None):
+    """Счётчики для панели показателей (хранятся в памяти, сбрасываются при перезапуске)."""
+    with _stats_lock:
+        if sub is None:
+            STATS[key] += 1
+        else:
+            STATS[key][sub] = STATS[key].get(sub, 0) + 1
+
+
 @app.errorhandler(413)
 def too_large(_e):
     return jsonify({"status": "error", "response": "Запрос слишком большой (максимум 6 МБ)"}), 413
@@ -364,11 +380,16 @@ def handle_command():
 
     low = command.lower()
     local = image is None  # с фото всегда идём к ИИ
+    _bump("commands")
+    if image:
+        _bump("photos")
     # Локальные команды — без обращения к ИИ
     if local and "привет" in low:
+        _bump("local")
         return jsonify({"status": "success",
                         "response": "Привет! Системы Элла активированы."})
     if local and "статус" in low:
+        _bump("local")
         count = lambda st: sum(1 for _, s in MODULES.values() if s == st)
         return jsonify({
             "status": "success",
@@ -378,6 +399,7 @@ def handle_command():
         })
 
     if local and any(w in low for w in ("арбитраж", "спред")):
+        _bump("local")
         try:
             text = arbitrage.summarize(arbitrage.scan())
         except Exception as e:
@@ -395,7 +417,11 @@ def handle_command():
     try:
         answer, used, mod_id, used_tools = ask_ai(command, provider, session_id, explicit, image)
     except AIError as e:
+        _bump("ai_errors")
         return jsonify({"status": "error", "response": f"Сбой ИИ: {e}"}), 502
+    _bump("ai_ok", used)
+    for t in used_tools:
+        _bump("tools", t)
 
     return jsonify({
         "status": "success",
@@ -476,6 +502,60 @@ def auth_login():
         return jsonify({"status": "error", "response": "Неверная кодовая фраза"}), 401
     token, exp = security.issue_token()
     return jsonify({"status": "success", "token": token, "expires_at": exp})
+
+
+# ---------- Панель показателей и графики ----------
+@app.route("/dashboard")
+def dashboard():
+    counts = {}
+    for _, status in MODULES.values():
+        counts[status] = counts.get(status, 0) + 1
+    jobs = {}
+    for j in cad.list_jobs(200):
+        jobs[j["status"]] = jobs.get(j["status"], 0) + 1
+    with _stats_lock:
+        stats = json.loads(json.dumps(STATS))
+    return jsonify({
+        "version": VERSION,
+        "uptime_s": int(time.time() - START_TIME),
+        "auth_mode": security.auth_mode(),
+        "providers": {
+            "claude": {"configured": bool(ANTHROPIC_API_KEY), "model": CLAUDE_MODEL},
+            "gemini": {"configured": bool(GEMINI_API_KEY), "model": GEMINI_MODEL},
+        },
+        "modules": [{"id": i, "name": n, "status": s} for i, (n, s) in MODULES.items()],
+        "module_counts": counts,
+        "stats": stats,
+        "cad_jobs": jobs,
+        "tools_available": len(tools.SPECS),
+    })
+
+
+CHARTS = {
+    "depth_profile": charts.depth_profile,
+    "blackbody": charts.blackbody_curve,
+    "section": charts.section,
+}
+
+
+@app.route("/charts/rocks")
+def charts_rocks():
+    return jsonify({"rocks": charts.ROCKS, "demo_layers": charts.DEMO_LAYERS})
+
+
+@app.route("/chart/<name>", methods=["POST"])
+def chart_run(name):
+    fn = CHARTS.get(name)
+    if not fn:
+        return jsonify({"status": "error", "response": "Неизвестный график"}), 404
+    params = request.get_json(silent=True)
+    if not isinstance(params, dict):
+        return jsonify({"status": "error", "response": "Нужен JSON-объект"}), 400
+    try:
+        result = fn(params)
+    except ValueError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return jsonify({"status": "success", "chart": name, "result": result})
 
 
 # ---------- Приложение (PWA): манифест, service worker, иконки ----------
