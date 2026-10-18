@@ -2,8 +2,3 @@ flask
 flask-cors
 requests
 gunicorn
-fastapi
-uvicorn
-chromadb
-pydantic
-
