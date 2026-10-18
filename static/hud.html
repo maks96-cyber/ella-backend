@@ -77,6 +77,9 @@ button{cursor:pointer}
 .tbl th,.tbl td{padding:4px 6px;border-bottom:1px solid #0d2a5c;text-align:left}
 .tbl th{color:var(--dim);font-weight:500}
 .view svg{display:block;margin:6px 0}
+.note{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:10px 12px;margin-bottom:8px}
+.note span{flex:1;word-break:break-word}
+textarea{width:100%;background:var(--panel);color:var(--txt);border:1px solid #123a7a;border-radius:10px;padding:10px 12px;font:inherit;resize:vertical}
 </style>
 </head>
 <body>
@@ -86,6 +89,8 @@ button{cursor:pointer}
  <button data-tab="dash">Панель</button>
  <button data-tab="charts">Графики</button>
  <button data-tab="section">Разрез</button>
+ <button data-tab="memory">Память</button>
+ <button data-tab="kb">Знания</button>
 </nav>
 <main id="log"></main>
 <section class="view" id="v-dash">
@@ -108,6 +113,29 @@ button{cursor:pointer}
   <button id="bbGo" style="margin-top:8px">Построить</button>
   <div id="bbOut"></div>
  </div>
+</section>
+<section class="view" id="v-kb">
+ <div class="card"><h3>База знаний</h3>
+  <div id="kbStatus" class="muted">Загрузка…</div>
+  <label class="fld" style="margin-top:10px">Название<input id="kbTitle" maxlength="100" placeholder="напр. Заметки по бурению"></label>
+  <textarea id="kbText" rows="6" placeholder="Вставьте текст, который Элла должна изучить…" style="margin-top:8px"></textarea>
+  <button id="kbLearn" style="margin-top:8px">Изучить текст</button>
+  <div class="frow" style="margin-top:12px"><input id="kbTopic" placeholder="Тема для конспекта ИИ"><button id="kbTopicGo">Конспект ИИ</button></div>
+  <div class="muted">Конспект пишет ИИ и может ошибаться — такие записи помечены. В чате: «изучи тему …», «что ты знаешь о …».</div>
+ </div>
+ <div class="card"><h3>Поиск</h3>
+  <div class="frow"><input id="kbQ" placeholder="Что найти?"><button id="kbSearch">Найти</button></div>
+  <div id="kbHits"></div>
+ </div>
+ <div id="kbList"></div>
+</section>
+<section class="view" id="v-memory">
+ <div class="card"><h3>Память Эллы</h3>
+  <div id="memStatus" class="muted">Загрузка…</div>
+  <div class="frow" style="margin-top:10px"><input id="memText" placeholder="Что запомнить?" maxlength="500"><button id="memAdd">Запомнить</button></div>
+  <div class="muted">Голосом: «запомни …», «что ты помнишь», «забудь 2». Пароли, ключи и номера карт я не сохраняю.</div>
+ </div>
+ <div id="memList"></div>
 </section>
 <section class="view" id="v-section">
  <div class="card"><h3>Геологический разрез</h3>
@@ -461,10 +489,12 @@ function showTab(name){
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === name);
   $("log").style.display = name === "chat" ? "" : "none";
   document.querySelector("footer").style.display = name === "chat" ? "" : "none";
-  for (const t of ["dash", "charts", "section"]) $("v-" + t).style.display = name === t ? "block" : "none";
+  for (const t of ["dash", "charts", "section", "memory", "kb"]) $("v-" + t).style.display = name === t ? "block" : "none";
   if (name === "dash") loadDash();
   if (name === "charts" && !chartsInit) initCharts();
   if (name === "section" && !sectionInit) initSection();
+  if (name === "memory") loadMemory();
+  if (name === "kb") loadKb();
 }
 for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => showTab(b.dataset.tab);
 
@@ -513,6 +543,17 @@ async function loadDash(){
         `<div class="bar"><span>${esc(k)}</span><i style="width:${Math.max(6, Math.round(v / tmax * 100))}%"></i><b>${v}</b></div>`).join("") : ""}
     </div>
     <div class="card"><h3>Задания САПР</h3><div>${jobs}</div></div>
+    <div class="card"><h3>Память</h3>
+      <div class="kv"><span>Заметок</span><b>${d.memory.count === null ? "—" : d.memory.count + " из " + d.memory.limit}</b></div>
+      <div class="kv"><span>Хранилище</span><b>${dot(d.memory.persistent)} ${esc(d.memory.backend)}</b></div>
+      ${d.memory.persistent ? "" : '<div class="muted" style="margin-top:6px">Память сотрётся при перезапуске сервера. Подключите Upstash Redis.</div>'}
+      ${d.memory.error ? '<div class="down" style="margin-top:6px">' + esc(d.memory.error) + "</div>" : ""}
+    </div>
+    <div class="card"><h3>База знаний</h3>
+      <div class="kv"><span>Материалов</span><b>${d.knowledge.docs === null ? "—" : d.knowledge.docs}</b></div>
+      <div class="kv"><span>Фрагментов</span><b>${d.knowledge.chunks === null ? "—" : d.knowledge.chunks + " из " + d.knowledge.max_chunks}</b></div>
+      ${d.knowledge.error ? '<div class="down" style="margin-top:6px">' + esc(d.knowledge.error) + "</div>" : ""}
+    </div>
     <div class="card"><h3>Рынок <button id="mktBtn" class="mini" title="Обновить">⟳</button></h3><div id="market" class="muted">Загрузка…</div></div>`;
   for (const ch of document.querySelectorAll(".chip")) ch.onclick = () => {
     const m = dashModules.find(x => x.id === +ch.dataset.i);
@@ -578,6 +619,80 @@ async function buildSpectrum(){
       `<div class="muted">T = ${fmt(d.temperature_k)} К · пик ${fmt(d.peak_nm)} нм · излучает ${fmtPower(d.power_w_m2)}</div>`;
   } catch(e){ $("bbOut").textContent = e.message; }
 }
+
+// ---------- База знаний ----------
+async function loadKb(){
+  $("kbStatus").textContent = "Загрузка…";
+  try {
+    const r = await api("/kb");
+    const total = r.docs.reduce((s, d) => s + d.chunks, 0);
+    $("kbStatus").innerHTML = `${dot(r.persistent)} ${esc(r.backend)} · материалов ${r.docs.length} · фрагментов ${total} из ${r.max_chunks}`;
+    $("kbList").innerHTML = r.docs.length ? r.docs.map(d =>
+      `<div class="card note"><span><b>${esc(d.title)}</b><br><span class="muted">${d.chunks} фрагм. · ${d.chars} симв.${d.source === "ai" ? " · конспект ИИ, не проверен" : ""}</span></span>` +
+      `<button class="kb-del" data-id="${esc(d.id)}" title="Удалить">✕</button></div>`).join("")
+      : '<div class="muted">Пока пусто. Вставьте текст выше или попросите конспект по теме.</div>';
+    for (const b of document.querySelectorAll(".kb-del")) b.onclick = async () => {
+      try { await api("/kb/" + encodeURIComponent(b.dataset.id), {method: "DELETE"}); loadKb(); }
+      catch(e){ $("kbStatus").textContent = e.message; }
+    };
+  } catch(e){ $("kbStatus").textContent = e.message; }
+}
+async function kbSave(body, busy){
+  $("kbStatus").textContent = busy;
+  try {
+    const r = await api("/kb/learn", {method: "POST", body: JSON.stringify(body)});
+    $("kbTitle").value = ""; $("kbText").value = ""; $("kbTopic").value = "";
+    await loadKb();
+    $("kbStatus").insertAdjacentText("beforeend", ` · сохранено «${r.doc.title}» (${r.doc.chunks} фрагм.)`);
+  } catch(e){ $("kbStatus").textContent = e.message; }
+}
+$("kbLearn").onclick = () => {
+  const title = $("kbTitle").value.trim(), text = $("kbText").value.trim();
+  if (!title || !text) { $("kbStatus").textContent = "Заполните название и текст."; return; }
+  kbSave({title, text}, "Изучаю…");
+};
+$("kbTopicGo").onclick = () => {
+  const topic = $("kbTopic").value.trim();
+  if (!topic) { $("kbStatus").textContent = "Укажите тему."; return; }
+  kbSave({topic}, "Пишу конспект, это займёт несколько секунд…");
+};
+async function kbSearch(){
+  const question = $("kbQ").value.trim();
+  if (!question) return;
+  $("kbHits").textContent = "Ищу…";
+  try {
+    const r = await api("/kb/search", {method: "POST", body: JSON.stringify({question})});
+    $("kbHits").innerHTML = r.hits.length ? r.hits.map(h =>
+      `<div class="card"><b>${esc(h.title)}</b> <span class="muted">· фрагмент ${h.part} · релевантность ${h.score}${h.source === "ai" ? " · конспект ИИ" : ""}</span><div style="margin-top:6px;white-space:pre-wrap">${esc(h.text)}</div></div>`).join("")
+      : '<div class="muted">Ничего подходящего не нашлось.</div>';
+  } catch(e){ $("kbHits").textContent = e.message; }
+}
+$("kbSearch").onclick = kbSearch;
+$("kbQ").onkeydown = e => { if (e.key === "Enter") kbSearch(); };
+
+// ---------- Память ----------
+async function loadMemory(){
+  $("memStatus").textContent = "Загрузка…";
+  try {
+    const r = await api("/memory");
+    $("memStatus").innerHTML = `${dot(r.persistent)} Хранилище: ${esc(r.backend)} · заметок ${r.notes.length} из ${r.limit}`;
+    $("memList").innerHTML = r.notes.length ? r.notes.map((n, i) =>
+      `<div class="card note"><span><b class="muted">${i + 1}.</b> ${esc(n.text)}</span><button class="mem-del" data-id="${esc(n.id)}" title="Забыть">✕</button></div>`).join("")
+      : '<div class="muted">Пока пусто. Напишите «запомни …» в чате или добавьте заметку выше.</div>';
+    for (const b of document.querySelectorAll(".mem-del")) b.onclick = async () => {
+      try { await api("/memory/" + encodeURIComponent(b.dataset.id), {method: "DELETE"}); loadMemory(); }
+      catch(e){ $("memStatus").textContent = e.message; }
+    };
+  } catch(e){ $("memStatus").textContent = e.message; }
+}
+async function addNote(){
+  const text = $("memText").value.trim();
+  if (!text) return;
+  try { await api("/memory", {method: "POST", body: JSON.stringify({text})}); $("memText").value = ""; loadMemory(); }
+  catch(e){ $("memStatus").textContent = e.message; }
+}
+$("memAdd").onclick = addNote;
+$("memText").onkeydown = e => { if (e.key === "Enter") addNote(); };
 
 // ---------- Разрез ----------
 let rocks = {}, layers = [];
