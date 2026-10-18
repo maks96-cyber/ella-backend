@@ -1,4 +1,4 @@
-"""Ella backend v1.8.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
+"""Ella backend v1.10.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
 import base64
 import hmac
 import json
@@ -14,6 +14,8 @@ import arbitrage
 import cad
 import charts
 import geology
+import knowledge
+import memory
 import pwa
 import quantum
 import robotics
@@ -31,7 +33,7 @@ app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # фото в HUD сжима
 if CORS:
     CORS(app)
 
-VERSION = "1.8.0"
+VERSION = "1.10.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
@@ -49,7 +51,7 @@ MAX_HISTORY = 12  # сообщений на сессию (хранится в п
 MODULES = {
     1: ("Интеграция ИИ (Gemini)", "active"),
     2: ("Интеграция ИИ (Claude)", "active"),
-    3: ("Саморазвитие и детское обучение", "basic"),
+    3: ("Саморазвитие и обучение: база знаний", "active"),
     4: ("Голосовой интерфейс и распознавание речи", "beta"),
     5: ("Духовные знания", "basic"),
     6: ("Инженерия и САПР (Компас-3D, SolidWorks)", "beta"),
@@ -64,7 +66,7 @@ MODULES = {
     15: ("Ионная логистика", "active"),
     16: ("Сапфировый HUD: данные (/status)", "active"),
     17: ("Сапфировый HUD: интерфейс (/hud)", "active"),
-    18: ("Оркестрация: маршрутизация и инструменты ИИ", "active"),
+    18: ("Оркестрация: маршрутизация, инструменты ИИ, память", "active"),
 }
 
 BASE_PROMPT = (
@@ -316,10 +318,26 @@ def ask_gemini(system: str, history: list, trace: list, image=None) -> str:
 PROVIDERS = {"claude": ask_claude, "gemini": ask_gemini}
 
 
+def _configured(name: str) -> bool:
+    return bool(ANTHROPIC_API_KEY if name == "claude" else GEMINI_API_KEY)
+
+
+def ask_plain(system: str, prompt: str) -> str:
+    """Один запрос к ИИ без истории и фото (для конспектов). Пробует всех провайдеров."""
+    order = sorted(PROVIDERS, key=lambda n: (not _configured(n), n != DEFAULT_PROVIDER))
+    errors = []
+    for name in order:
+        try:
+            return PROVIDERS[name](system, [{"role": "user", "content": prompt}], [], None)
+        except (AIError, requests.RequestException) as e:
+            errors.append(f"{name}: {e}")
+    raise AIError("; ".join(errors))
+
+
 def ask_ai(text: str, provider: str, session_id: str, explicit_module=None, image=None):
     """Возвращает (ответ, провайдер, модуль, инструменты). При сбое пробует второго."""
     mod_id = pick_module(text, explicit_module)
-    system = build_system_prompt(mod_id)
+    system = build_system_prompt(mod_id) + memory.prompt_block() + knowledge.prompt_block(text)
     history = list(_sessions[session_id]) + [{"role": "user", "content": text}]
 
     order = [provider] + [p for p in PROVIDERS if p != provider]
@@ -384,6 +402,16 @@ def handle_command():
     if image:
         _bump("photos")
     # Локальные команды — без обращения к ИИ
+    if local:
+        mem_reply = memory.handle_command(command)
+        if mem_reply is not None:
+            _bump("local")
+            return jsonify({"status": "success", "response": mem_reply,
+                            "module": 18, "tools": []})
+        kb_reply = knowledge.handle_command(command, ask_plain)
+        if kb_reply is not None:
+            return jsonify({"status": "success", "response": kb_reply,
+                            "module": 3, "tools": []})
     if local and "привет" in low:
         _bump("local")
         return jsonify({"status": "success",
@@ -528,6 +556,8 @@ def dashboard():
         "stats": stats,
         "cad_jobs": jobs,
         "tools_available": len(tools.SPECS),
+        "memory": memory.status(),
+        "knowledge": knowledge.status(),
     })
 
 
@@ -556,6 +586,109 @@ def chart_run(name):
     except ValueError as e:
         return jsonify({"status": "error", "response": str(e)}), 400
     return jsonify({"status": "success", "chart": name, "result": result})
+
+
+# ---------- Память ----------
+@app.route("/memory", methods=["GET", "POST"])
+def memory_notes():
+    try:
+        if request.method == "GET":
+            return jsonify({"notes": memory.list_notes(fresh=True),
+                            "backend": memory.backend_name(),
+                            "persistent": memory.persistent(),
+                            "limit": memory.MAX_NOTES})
+        data = request.get_json(silent=True) or {}
+        note = memory.add(str(data.get("text", "")))
+    except memory.NoteError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return jsonify({"status": "success", "note": note}), 201
+
+
+@app.route("/memory/<note_id>", methods=["DELETE"])
+def memory_delete(note_id):
+    try:
+        found = memory.delete(note_id)
+    except memory.NoteError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    if not found:
+        return jsonify({"status": "error", "response": "Заметка не найдена"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/memory/clear", methods=["POST"])
+def memory_clear():
+    data = request.get_json(silent=True) or {}
+    if data.get("confirm") is not True:
+        return jsonify({"status": "error", "response": "Нужно подтверждение: {\"confirm\": true}"}), 400
+    try:
+        removed = memory.clear()
+    except memory.NoteError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    return jsonify({"status": "success", "removed": removed})
+
+
+# ---------- База знаний ----------
+@app.route("/kb")
+def kb_list():
+    try:
+        docs = knowledge.list_docs()
+    except knowledge.KBError as e:
+        return jsonify({"status": "error", "response": str(e)}), 502
+    return jsonify({"docs": docs, "backend": memory.backend_name(),
+                    "persistent": memory.persistent(),
+                    "max_docs": knowledge.MAX_DOCS, "max_chunks": knowledge.MAX_CHUNKS})
+
+
+@app.route("/kb/learn", methods=["POST"])
+def kb_learn():
+    """{"title","text"} — изучить текст; {"topic"} — конспект от ИИ (помечается как непроверенный)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        if data.get("topic"):
+            doc = knowledge.learn_topic(str(data["topic"]), ask_plain)
+        else:
+            doc = knowledge.learn(str(data.get("title", "")), str(data.get("text", "")))
+    except knowledge.KBError as e:
+        return jsonify({"status": "error", "response": str(e)}), 400
+    except AIError as e:
+        return jsonify({"status": "error", "response": f"Сбой ИИ: {e}"}), 502
+    return jsonify({"status": "success", "doc": doc}), 201
+
+
+@app.route("/kb/search", methods=["POST"])
+def kb_search():
+    data = request.get_json(silent=True) or {}
+    question = str(data.get("question", "")).strip()
+    if not question:
+        return jsonify({"status": "error", "response": "Запрос пуст"}), 400
+    try:
+        hits = knowledge.search(question, 3)
+    except knowledge.KBError as e:
+        return jsonify({"status": "error", "response": str(e)}), 502
+    return jsonify({"status": "success", "query": question, "hits": hits})
+
+
+@app.route("/kb/<doc_id>", methods=["DELETE"])
+def kb_delete(doc_id):
+    try:
+        found = knowledge.delete_doc(doc_id)
+    except knowledge.KBError as e:
+        return jsonify({"status": "error", "response": str(e)}), 502
+    if not found:
+        return jsonify({"status": "error", "response": "Материал не найден"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/kb/clear", methods=["POST"])
+def kb_clear():
+    data = request.get_json(silent=True) or {}
+    if data.get("confirm") is not True:
+        return jsonify({"status": "error", "response": "Нужно подтверждение: {\"confirm\": true}"}), 400
+    try:
+        removed = knowledge.clear()
+    except knowledge.KBError as e:
+        return jsonify({"status": "error", "response": str(e)}), 502
+    return jsonify({"status": "success", "removed": removed})
 
 
 # ---------- Приложение (PWA): манифест, service worker, иконки ----------
