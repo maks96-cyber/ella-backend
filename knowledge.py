@@ -33,7 +33,7 @@ MAX_DOCS = 100
 MAX_CHUNKS = 1500
 CHUNK_SIZE = 700
 CACHE_TTL = 60
-MIN_SCORE = 1.0  # ниже — фрагмент считается не относящимся к вопросу
+MIN_SCORE = 0.25  # ниже — фрагмент считается не относящимся к вопросу
 K1, B = 1.5, 0.75
 
 _lock = threading.RLock()
@@ -73,7 +73,9 @@ def chunk_text(text: str) -> list:
 
 _TOKEN = re.compile(r"[a-zа-я0-9]+")
 _STOP = set("""и в во на не что это как для по из от до за или но а с со к у о об же бы то ли был была были
-быть его ее их при так все всё еще уже есть нет да the and for with that this are was were""".split())
+быть его ее их при так все всё еще уже есть нет да the and for with that this are was were
+какая какой какие какое каким сколько почему зачем когда чтобы можно надо нужен нужно будет этот этого
+такое такой меня мне мой расскажи объясни поясни покажи скажи про над под где чем вот тут там""".split())
 
 
 def tokenize(text: str) -> list:
@@ -100,8 +102,13 @@ class _Index:
 
     def search(self, query: str, k: int = 3) -> list:
         terms = set(tokenize(query))
+        if not terms:
+            return []
+        need = max(1, math.ceil(len(terms) * 0.5))  # хотя бы половина слов вопроса
         scored = []
         for i, tf in enumerate(self.tf):
+            if sum(1 for t in terms if tf.get(t)) < need:
+                continue
             s = 0.0
             for term in terms:
                 f = tf.get(term, 0)
