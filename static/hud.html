@@ -159,7 +159,7 @@ textarea{width:100%;background:var(--panel);color:var(--txt);border:1px solid #1
   <button id="send">▶</button>
  </div>
  <div class="row" style="flex-wrap:wrap">
-  <select id="provider"><option value="gemini">Gemini</option><option value="claude">Claude</option></select>
+  <select id="provider"><option value="gemini">Gemini</option><option value="claude">Claude</option><option value="local">Локально (без ИИ)</option></select>
   <label style="font-size:14px;color:var(--dim)"><input type="checkbox" id="speak" checked style="flex:none"> озвучивать</label>
   <button id="cam" title="Сфотографировать" aria-label="Камера">📷</button>
   <button id="gal" title="Фото из галереи" aria-label="Галерея">🖼</button>
@@ -522,6 +522,7 @@ async function loadDash(){
       <div class="kv"><span>Защита входа</span><b>${esc(d.auth_mode)}</b></div>
       <div class="kv"><span>Gemini</span><b>${dot(d.providers.gemini.configured)} ${esc(d.providers.gemini.model)}</b></div>
       <div class="kv"><span>Claude</span><b>${dot(d.providers.claude.configured)} ${d.providers.claude.configured ? esc(d.providers.claude.model) : "нет ключа"}</b></div>
+      <div class="kv"><span>Локальный движок</span><b>${dot(true)} расчёты, память, знания${d.offline ? " · автономный режим" : ""}</b></div>
       <div class="kv"><span>Инструментов ИИ</span><b>${d.tools_available}</b></div>
     </div>
     <div class="card"><h3>Модули</h3>
