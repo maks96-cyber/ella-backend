@@ -1,4 +1,4 @@
-"""Ella backend v1.10.0 — модули 1-2 (ИИ), 4 (голос), 6 (САПР), 7, 9, 11, 13."""
+"""Ella backend v1.12.0 — модули 1-18 (ИИ, САПР, Инженерия, Память, Безопасность)."""
 import base64
 import hmac
 import json
@@ -15,6 +15,7 @@ import cad
 import charts
 import geology
 import knowledge
+import localnlu
 import memory
 import pwa
 import quantum
@@ -33,7 +34,7 @@ app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # фото в HUD сжима
 if CORS:
     CORS(app)
 
-VERSION = "1.10.0"
+VERSION = "1.12.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Конфигурация (переменные окружения на Render) ----------
@@ -42,19 +43,32 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "claude")  # claude | gemini
+OFFLINE = os.getenv("ELLA_OFFLINE", "") == "1"  # 1 — никогда не обращаться к внешнему ИИ
 REQUEST_TIMEOUT = 60
 MAX_TOOL_ROUNDS = 4  # сколько раз подряд ИИ может вызывать инструменты
 MAX_HISTORY = 12  # сообщений на сессию (хранится в памяти процесса)
 
+# ---------- Защищенная системная конфигурация Эллы ----------
+ELLA_CORE_CONFIG = {
+    "version": VERSION,
+    "name": "Ella",
+    "mode": "Jarvis-Automation",
+    "parameters": {
+        "voice_control": True,
+        "auto_learning": True,
+        "engineering_module": True,
+        "mechanics_simulation": True
+    }
+}
+
 # ---------- Реестр модулей (1-18) ----------
-# status: "active" — есть рабочий код; "planned" — только промпт-персона
 MODULES = {
     1: ("Интеграция ИИ (Gemini)", "active"),
     2: ("Интеграция ИИ (Claude)", "active"),
     3: ("Саморазвитие и обучение: база знаний", "active"),
     4: ("Голосовой интерфейс и распознавание речи", "beta"),
     5: ("Духовные знания", "basic"),
-    6: ("Инженерия и САПР (Компас-3D, SolidWorks)", "beta"),
+    6: ("Инженерия и САПР (Компас-3D, SolidWorks, Схемы, Чертежи)", "active"),
     7: ("Крипто- и финансовый арбитраж", "active"),
     8: ("Спутниковая связь GNSS и Direct-to-Cell", "active"),
     9: ("Глубинная геология (4-5+ км)", "active"),
@@ -85,11 +99,10 @@ BASE_PROMPT = (
     "диагнозов по фото."
 )
 
-# Доменные персоны для маршрутизации по ключевым словам
 DOMAIN_PROMPTS = {
     6: ("Домен: инженерия и САПР. Помогай с чертежами, допусками, "
-        "моделированием в Компас-3D и SolidWorks.",
-        ("компас", "solidworks", "чертёж", "чертеж", "сапр", "допуск")),
+        "моделированием в Компас-3D и SolidWorks, составлением схем и инструкций сборки.",
+        ("компас", "solidworks", "чертёж", "чертеж", "сапр", "допуск", "схема", "сборка", "детали")),
     7: ("Домен: крипто и арбитраж. Давай аналитику, но не финансовые "
         "гарантии; указывай риски.",
         ("крипто", "арбитраж", "биткоин", "bitcoin", "курс", "биржа")),
@@ -115,7 +128,7 @@ DOMAIN_PROMPTS = {
     3: ("Домен: саморазвитие и обучение детей. Объясняй просто и по шагам, "
         "адаптируй под возраст, проверяй понимание вопросами, поддерживай интерес. "
         "Не ставь диагнозов и не заменяй педагога, врача или психолога.",
-        ("ребёнок", "ребенок", "детей", "урок", "саморазвит", "выучить")),
+        ("ребёнок", "ребенок", "детей", "урок", "саморазвит", "выучить", "изучи")),
     5: ("Домен: духовные знания (Коран, Сихах Ситта, пророческая медицина). "
         "Отвечай уважительно. НЕ выдумывай аяты и хадисы: называй суру и номер аята, "
         "сборник и номер хадиса только когда уверена, иначе прямо скажи, что нужно "
@@ -126,7 +139,6 @@ DOMAIN_PROMPTS = {
 }
 
 _sessions = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
-
 
 # ---------- Вспомогательные функции ----------
 START_TIME = time.time()
@@ -303,7 +315,6 @@ def ask_gemini(system: str, history: list, trace: list, image=None) -> str:
         calls = [p["functionCall"] for p in parts if "functionCall" in p]
         if not calls:
             return "".join(p.get("text", "") for p in parts)
-        # Ответ модели возвращаем как есть (в нём могут быть служебные подписи)
         contents.append({"role": "model", "parts": parts})
         responses = []
         for c in calls:
@@ -356,10 +367,38 @@ def ask_ai(text: str, provider: str, session_id: str, explicit_module=None, imag
     raise AIError("; ".join(errors))
 
 
+# ---------- Инженерный модуль механики и расчетов ----------
+def simulate_engineering_tests(params=None):
+    """Модуль виртуального тестирования и анализа на основе теоретической и инженерной механики."""
+    params = params or {}
+    mass = float(params.get("mass_kg", 5.0))
+    force = float(params.get("force_n", 50.0))
+    friction_coef = float(params.get("friction_coef", 0.2))
+    g_acc = 9.81
+
+    friction_force = mass * g_acc * friction_coef
+    net_force = force - friction_force
+    acceleration = net_force / mass if mass > 0 else 0.0
+    is_stable = net_force > 0
+
+    return {
+        "calculated_friction_force_N": round(friction_force, 2),
+        "net_force_N": round(net_force, 2),
+        "acceleration_m_s2": round(acceleration, 2),
+        "safety_margin": "Высокий" if acceleration > 0.5 else ("Минимальный" if acceleration > 0 else "Смещение отсутствует"),
+        "passed_simulation": is_stable
+    }
+
+
 # ---------- Эндпоинты ----------
 @app.route("/")
 def home():
-    return jsonify({"status": "online", "assistant": "Ella", "version": VERSION})
+    return jsonify({
+        "status": "online",
+        "assistant": "Ella",
+        "version": VERSION,
+        "config": ELLA_CORE_CONFIG
+    })
 
 
 @app.route("/health")
@@ -382,6 +421,42 @@ def status():
     })
 
 
+def _local_reply(calc):
+    _bump("local")
+    _bump("tools", calc["tool"])
+    return jsonify({"status": "success", "response": calc["text"], "provider": "local",
+                    "module": calc["module"], "tools": [calc["tool"]]})
+
+
+def _offline_reply(command, image, reason):
+    note = f"ИИ недоступен ({reason}). " if reason else ""
+    if image is None:
+        calc = localnlu.answer(command)
+        if calc:
+            if reason:
+                calc["text"] = note + "Посчитала сама:\n" + calc["text"]
+            return _local_reply(calc)
+        try:
+            hits = knowledge.search(command, 3)
+        except Exception:
+            hits = []
+        if hits:
+            _bump("local")
+            body = "\n\n".join(
+                f"[{h['title']}{' · конспект ИИ' if h['source'] == 'ai' else ''}] {h['text'][:400]}"
+                for h in hits)
+            return jsonify({"status": "success", "response": f"{note}Нашла в базе знаний:\n{body}",
+                            "provider": "local", "module": 3, "tools": []})
+        text = localnlu.CAPABILITIES
+    else:
+        text = "Разбор фото требует ИИ (Gemini или Claude)."
+    if reason:
+        return jsonify({"status": "error", "response": f"Сбой ИИ: {reason}\n\n{text}"}), 502
+    _bump("local")
+    return jsonify({"status": "success", "provider": "local", "module": 18, "tools": [],
+                    "response": "Работаю без ИИ. " + text})
+
+
 @app.route("/command", methods=["POST"])
 def handle_command():
     data = request.get_json(silent=True) or {}
@@ -397,11 +472,11 @@ def handle_command():
         return jsonify({"status": "error", "response": "Пустая команда"}), 400
 
     low = command.lower()
-    local = image is None  # с фото всегда идём к ИИ
+    local = image is None
     _bump("commands")
     if image:
         _bump("photos")
-    # Локальные команды — без обращения к ИИ
+
     if local:
         mem_reply = memory.handle_command(command)
         if mem_reply is not None:
@@ -435,18 +510,26 @@ def handle_command():
                             "response": f"Сбой модуля 7: {e}"}), 502
         return jsonify({"status": "success", "response": text, "module": 7})
 
-    provider = str(data.get("provider", DEFAULT_PROVIDER)).lower()
-    if provider not in PROVIDERS:
-        provider = DEFAULT_PROVIDER
+    requested = str(data.get("provider", DEFAULT_PROVIDER)).lower()
+    offline = OFFLINE or requested == "local"
+
+    if local and (offline or not localnlu.wants_explanation(command)):
+        calc = localnlu.answer(command)
+        if calc:
+            return _local_reply(calc)
+
+    provider = requested if requested in PROVIDERS else DEFAULT_PROVIDER
     session_id = str(data.get("session_id", "default"))[:64]
     explicit = data.get("module")
     explicit = explicit if isinstance(explicit, int) else None
 
+    if offline:
+        return _offline_reply(command, image, None)
     try:
         answer, used, mod_id, used_tools = ask_ai(command, provider, session_id, explicit, image)
     except AIError as e:
         _bump("ai_errors")
-        return jsonify({"status": "error", "response": f"Сбой ИИ: {e}"}), 502
+        return _offline_reply(command, image, str(e))
     _bump("ai_ok", used)
     for t in used_tools:
         _bump("tools", t)
@@ -462,7 +545,6 @@ def handle_command():
 
 @app.route("/arbitrage/scan")
 def arbitrage_scan():
-    """GET /arbitrage/scan?assets=BTC,ETH — публичные котировки и спреды."""
     assets = [a for a in request.args.get("assets", "").split(",") if a] or None
     try:
         return jsonify(arbitrage.scan(assets))
@@ -470,7 +552,7 @@ def arbitrage_scan():
         return jsonify({"status": "error", "response": f"Сбой модуля 7: {e}"}), 502
 
 
-# ---------- Расчётные модули 9 и 13 ----------
+# ---------- Расчётные модули ----------
 CALC_DOMAINS = {
     "cad": (6, cad.CALCS),
     "geology": (9, geology.CALCS),
@@ -482,7 +564,6 @@ CALC_DOMAINS = {
 
 @app.route("/calc/<domain>")
 def calc_list(domain):
-    """GET /calc/geology — список расчётов и их параметров."""
     entry = CALC_DOMAINS.get(domain)
     if not entry:
         return jsonify({"status": "error", "response": "Неизвестный раздел"}), 404
@@ -495,7 +576,6 @@ def calc_list(domain):
 
 @app.route("/calc/<domain>/<name>", methods=["POST"])
 def calc_run(domain, name):
-    """POST /calc/geology/thermal  {"depth_km": 5}"""
     entry = CALC_DOMAINS.get(domain)
     if not entry or name not in entry[1]:
         return jsonify({"status": "error", "response": "Неизвестный расчёт"}), 404
@@ -558,6 +638,8 @@ def dashboard():
         "tools_available": len(tools.SPECS),
         "memory": memory.status(),
         "knowledge": knowledge.status(),
+        "offline": OFFLINE,
+        "core_config": ELLA_CORE_CONFIG
     })
 
 
@@ -641,7 +723,6 @@ def kb_list():
 
 @app.route("/kb/learn", methods=["POST"])
 def kb_learn():
-    """{"title","text"} — изучить текст; {"topic"} — конспект от ИИ (помечается как непроверенный)."""
     data = request.get_json(silent=True) or {}
     try:
         if data.get("topic"):
@@ -717,9 +798,8 @@ def pwa_icon(size):
     return resp
 
 
-# ---------- Модуль 6: САПР ----------
+# ---------- Модуль 6: САПР и Инженерные чертежи/проекты ----------
 def _bridge_only():
-    """Очередь заданий для моста доступна только по HMAC-подписи (не по токену HUD)."""
     if g.get("auth") != "hmac":
         return jsonify({"status": "error",
                         "response": "Только для моста с HMAC-подписью"}), 403
@@ -738,7 +818,6 @@ def cad_info():
 
 @app.route("/cad/dxf/<kind>", methods=["POST"])
 def cad_dxf(kind):
-    """POST /cad/dxf/flange {...} — вернёт DXF-файл для Компаса/SolidWorks."""
     entry = cad.GENERATORS.get(kind)
     if not entry:
         return jsonify({"status": "error", "response": "Неизвестный чертёж"}), 404
@@ -790,6 +869,84 @@ def cad_bridge_result(job_id):
     except ValueError as e:
         return jsonify({"status": "error", "response": str(e)}), 400
     return jsonify({"status": "success", "job": job})
+
+
+@app.route("/api/ella/design", methods=["POST"])
+def generate_engineering_project():
+    """Инженерный эндпоинт: генерация чертежей, схем, списка деталей, сборки и симуляция механики."""
+    data = request.get_json(silent=True) or {}
+    project_name = str(data.get("project_name", "Новое инженерное устройство")).strip()
+    mechanics_params = data.get("mechanics_params") or {"mass_kg": 5.0, "force_n": 50.0, "friction_coef": 0.2}
+
+    test_results = simulate_engineering_tests(mechanics_params)
+
+    mermaid_diagram = f"""graph TD
+    A[Несущее основание] --> B[Приводной блок]
+    B -->|Передача усилия {mechanics_params.get('force_n', 50)}N| C[Исполнительный орган]
+    C --> D[Направляющие качения]
+    D --> E[Датчик обратной связи]
+    """
+
+    project_blueprint = {
+        "project_name": project_name,
+        "blueprint_diagram_mermaid": mermaid_diagram,
+        "parts_list": [
+            {"id": 1, "name": "Несущий каркас", "material": "Алюминиевый профиль 20x20", "qty": 4},
+            {"id": 2, "name": "Привод / Мотор", "specs": f"Усилие {mechanics_params.get('force_n', 50)}N", "qty": 1},
+            {"id": 3, "name": "Подшипниковый узел", "specs": "Стандарт ISO/ГОСТ", "qty": 2},
+            {"id": 4, "name": "Крепеж", "specs": "Винты M5", "qty": 16}
+        ],
+        "assembly_instructions": [
+            "1. Собрать каркас из профилей.",
+            "2. Закрепить направляющие и подшипниковые узлы.",
+            "3. Установить привод и соединить с исполнительным органом.",
+            "4. Провести тестовый запуск и проверить зазоры."
+        ],
+        "mechanics_test_report": {
+            "theory": "Расчет теоретической и инженерной механики",
+            "parameters": mechanics_params,
+            "simulation_results": test_results
+        }
+    }
+
+    try:
+        knowledge.learn(f"Проект: {project_name}", json.dumps(project_blueprint, ensure_ascii=False))
+    except Exception:
+        pass
+
+    return jsonify({
+        "status": "success",
+        "message": f"Проект '{project_name}' с чертежом, схемой и симуляцией создан.",
+        "data": project_blueprint
+    })
+
+
+@app.route("/api/ella/learn", methods=["POST"])
+def api_ella_learn():
+    """Совместимый эндпоинт обучения."""
+    data = request.get_json(silent=True) or {}
+    topic = str(data.get("topic", "")).strip()
+    if not topic:
+        return jsonify({"status": "error", "response": "Укажите тему для изучения"}), 400
+    try:
+        doc = knowledge.learn_topic(topic, ask_plain)
+        return jsonify({"status": "success", "message": f"Тема '{topic}' успешно изучена и сохранена в память.", "doc": doc}), 201
+    except Exception as e:
+        return jsonify({"status": "error", "response": f"Сбой при обучении: {e}"}), 502
+
+
+@app.route("/api/ella/ask", methods=["POST"])
+def api_ella_ask():
+    """Совместимый эндпоинт поиска знаний."""
+    data = request.get_json(silent=True) or {}
+    question = str(data.get("question", "")).strip()
+    if not question:
+        return jsonify({"status": "error", "response": "Запрос пуст"}), 400
+    try:
+        hits = knowledge.search(question, 3)
+        return jsonify({"status": "success", "query": question, "hits": hits})
+    except Exception as e:
+        return jsonify({"status": "error", "response": f"Сбой при поиске: {e}"}), 502
 
 
 if __name__ == "__main__":
